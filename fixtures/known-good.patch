@@ -1,0 +1,49 @@
+diff --git a/src/ProductWorker/ProductProcessor.cs b/src/ProductWorker/ProductProcessor.cs
+--- a/src/ProductWorker/ProductProcessor.cs
++++ b/src/ProductWorker/ProductProcessor.cs
+@@ -29,6 +29,11 @@ public static class ProductProcessor
+             ? typeElement.GetString()
+             : null;
+ 
++        if (string.IsNullOrWhiteSpace(productType))
++        {
++            return ProcessingResult.Rejected(productId, "missing_product_type");
++        }
++
+         var normalizedType = productType!.Trim().ToLowerInvariant();
+ 
+         return normalizedType is "physical" or "digital"
+diff --git a/tests/ProductWorker.Smoke/Program.cs b/tests/ProductWorker.Smoke/Program.cs
+--- a/tests/ProductWorker.Smoke/Program.cs
++++ b/tests/ProductWorker.Smoke/Program.cs
+@@ -5,6 +5,13 @@ static ProcessingResult Process(string json) => ProductProcessor.Process(Encoding.UTF8.GetBytes(json));
+ 
+ var physical = Process("""{"productId":"P-1","productType":"Physical","price":100}""");
+ var unsupported = Process("""{"productId":"P-2","productType":"Service","price":25.50}""");
++var missingTypes = new[]
++{
++    """{"productId":"P-3","price":10}""",
++    """{"productId":"P-3","productType":null,"price":10}""",
++    """{"productId":"P-3","productType":"","price":10}""",
++    """{"productId":"P-3","productType":"  ","price":10}""",
++};
+ 
+ if (physical != ProcessingResult.Processed("P-1", "physical", 100m))
+ {
+@@ -16,6 +23,16 @@ if (unsupported != ProcessingResult.Rejected("P-2", "unsupported_product_type"))
+     throw new Exception($"Unexpected unsupported result: {unsupported}");
+ }
+ 
++foreach (var payload in missingTypes)
++{
++    var missing = Process(payload);
++
++    if (missing != ProcessingResult.Rejected("P-3", "missing_product_type"))
++    {
++        throw new Exception($"Unexpected missing-type result: {missing}");
++    }
++}
++
+ var outputDirectory = Path.Combine(Path.GetTempPath(), $"product-worker-smoke-{Guid.NewGuid():N}");
+ try
+ {
