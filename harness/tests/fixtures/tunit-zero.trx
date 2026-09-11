@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
-  <Results />
-  <TestDefinitions />
-  <ResultSummary outcome="Failed"><Counters total="0" executed="0" passed="0" failed="0" notExecuted="0" /></ResultSummary>
-</TestRun>
