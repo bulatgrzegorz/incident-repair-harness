@@ -1,20 +1,22 @@
 # Incident Repair Harness
 
-A deterministic .NET 10 experiment that reproduces, detects, repairs, and verifies a Kafka consumer blocked by a poison record.
+A deterministic local experiment that reproduces, detects, repairs, and verifies a Kafka consumer blocked by a poison record.
 
-The harness creates a real Kafka incident, confirms it through durable state and Grafana telemetry, tests a repair in restricted containers, replaces the broken worker, and verifies that the original partition resumes processing.
+We created it to test incident-repair workflows against a real failure rather than a toy code-editing task. Every run starts from the same intentional defect, preserves the broken Kafka and ledger state during repair, and records enough evidence to explain whether the repair actually restored progress.
 
-## Architecture
+The harness and worker are implemented in C# on .NET 10. Kafka, Grafana LGTM, restricted repair candidates, and the optional coding agent run in containers.
+
+## Architecture at a Glance
 
 ```mermaid
 flowchart LR
-    H[C# harness] -->|publishes records| K[Kafka]
+    H["C# harness"] -->|injects incident| K[Kafka]
     K --> W[ProductWorker]
-    W --> L[Durable JSON ledger]
-    W --> G[Grafana LGTM]
+    W --> L[Durable ledger]
+    W --> G[Grafana telemetry]
     G -->|alert evidence| H
     H -->|tests repair| C[Restricted candidate]
-    C -->|replaces worker| K
+    C -->|replaces broken worker| K
 ```
 
 The main components are:
@@ -27,7 +29,9 @@ The main components are:
 - `infrastructure/`: Compose, Grafana alerting, agent image, and proxy policy
 - `fixtures/known-good.patch`: deterministic repair used by fixture mode
 
-## Prerequisites
+## Quick Start
+
+### Prerequisites
 
 Install:
 
@@ -42,33 +46,34 @@ The first run needs internet access to restore NuGet packages, pull the pinned K
 
 The harness supports macOS and Linux. It automatically uses Docker when both Docker and Podman are available and working.
 
-## Quick Start
+### Clone and run
 
-Run commands from the repository root.
-
-Prepare the restricted candidate image:
+Run all commands from the repository root:
 
 ```bash
+git clone https://github.com/bulatgrzegorz/incident-repair-harness.git
+cd incident-repair-harness
+
 dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
   prepare --agent fixture
-```
-
-Check the local environment:
-
-```bash
 dotnet run --project harness/dotnet/IncidentHarness.csproj -- doctor
-```
-
-Run the deterministic repair experiment:
-
-```bash
 dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
   run --agent fixture
 ```
 
-A successful run prints its evidence directory and ends with `INCIDENT RESOLVED`.
+`prepare` builds the restricted SDK image used to compile, test, and run repair candidates. It comes before `doctor` because the prepared image is one of the checks.
 
-## Incident Scenario
+A successful run ends with output similar to:
+
+```text
+✓ INCIDENT RESOLVED
+Poison rejected | tail processed | partition drained | 61.7s
+Evidence  /path/to/incident-repair-harness/runs/20260911T131943Z-de42b209
+```
+
+The full run can take a few minutes, especially while Grafana waits for telemetry and evaluates the alert.
+
+## What to Observe
 
 The harness publishes three records to one Kafka partition:
 
@@ -78,13 +83,71 @@ The harness publishes three records to one Kafka partition:
 | `1` | Product with `productType: null` | Throws, seeks, and retries forever |
 | `2` | Valid digital product | Blocked behind offset `1` |
 
-The worker persists each result before committing its Kafka offset. The intentional null dereference prevents offset `1` from settling, leaves positive consumer lag, and causes the provisioned Grafana alert to fire.
+The important behavior is not merely the exception. The committed-next offset stays at `1`, the durable ledger contains only the baseline record, consumer lag remains positive, and a Grafana alert fires. The harness restarts the worker once to prove that the blockage survives a process restart.
 
-The harness restarts the broken worker to prove that the incident survives process replacement. Repair verification then uses the same Kafka group, topic, partition, and durable ledger.
+```mermaid
+sequenceDiagram
+    participant H as C# harness
+    participant K as Kafka
+    participant W as Broken worker
+    participant L as Output ledger
+    participant G as Grafana
 
-## Repair Verification
+    H->>K: Publish valid baseline at offset 0
+    K->>W: Deliver offset 0
+    W->>L: Persist processed result
+    W->>K: Commit next offset 1
+    H->>K: Publish poison at offset 1
+    H->>K: Publish valid tail at offset 2
+    loop Every second
+        K->>W: Deliver poison at offset 1
+        W->>W: NullReferenceException
+        W->>K: Seek back to offset 1
+    end
+    W-->>G: Failures, lag, and no new successes
+    G-->>H: Blocked-consumer alert
+```
 
-The repair must pass all of these gates:
+The fixture repair rejects missing product types as `missing_product_type`. It must pass a red/green regression check, four malformed-input policy checks, and recovery against the original broker and ledger state. Finally, a random valid probe proves that processing continues beyond the known tail record.
+
+## System Overview
+
+```mermaid
+flowchart LR
+    H["C# harness"] -->|creates topic and publishes records| K[Kafka 4.0]
+    K -->|partition records| W[.NET ProductWorker]
+    W -->|atomic durable writes| L[processed-products.json]
+    W -->|explicit offset commits| K
+    W -->|OTLP logs metrics traces| O[Grafana LGTM]
+    O -->|active alert API| H
+    H -->|copy source and evidence| A[Fixture or OpenCode agent]
+    A -->|candidate patch| T[Restricted red and green tests]
+    T -->|repaired worker| K
+    H -->|verify ledger and offsets| L
+```
+
+The worker disables Kafka auto-commit. For each record it computes a payload hash, checks the replay-aware ledger, processes the payload, atomically persists the result, and only then commits the offset. That ordering makes a replay after a crash idempotent.
+
+The intentional defect is in `src/ProductWorker/ProductProcessor.cs`: the processor dereferences `productType` before checking whether it is null. `KafkaWorker` treats the resulting exception as retryable, seeks back to the same record, and therefore blocks everything behind it.
+
+## Repair Lifecycle
+
+```mermaid
+flowchart LR
+    A[Preflight] --> B[Process baseline]
+    B --> C[Inject poison and tail]
+    C --> D[Observe retries and alert]
+    D --> E[Restart broken worker]
+    E --> F[Prepare candidate]
+    F --> G[Freeze source manifest]
+    G --> H[Run red control]
+    H --> I[Run candidate and policy checks]
+    I --> J[Replace worker]
+    J --> K[Verify recovery and fresh probe]
+    K --> L[Finalize artifacts]
+```
+
+The repair gates are designed to prevent a superficially green result:
 
 - Candidate source is copied and frozen before testing.
 - Symlinks, hard links, oversized files, and unexpected source changes are rejected.
@@ -115,7 +178,9 @@ dotnet run --project harness/dotnet/IncidentHarness.csproj -- --help
 | `run --agent opencode --model ... --credential-env ...` | Run an agent-authored repair experiment |
 | `inspect --run <run-id>` | Print a finalized verdict |
 
-## Smoke Mode
+## Running Modes
+
+### Reproduce without repair
 
 Reproduce the blocked consumer without applying a repair:
 
@@ -125,15 +190,7 @@ dotnet run --project harness/dotnet/IncidentHarness.csproj -- smoke
 
 Smoke mode records incident evidence under `runs/` but does not create a finalized verdict.
 
-Add `--keep` to preserve Kafka, Grafana, and their volumes for manual inspection:
-
-```bash
-dotnet run --project harness/dotnet/IncidentHarness.csproj -- smoke --keep
-```
-
-Grafana is available at [http://localhost:3000](http://localhost:3000) with `admin` / `admin` while the environment is retained.
-
-## Fixture Mode
+### Deterministic fixture repair
 
 Fixture mode applies `fixtures/known-good.patch` inside a copied candidate workspace. The checked-in worker remains intentionally broken.
 
@@ -144,7 +201,7 @@ dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
 
 This is the default, deterministic, and provider-free path.
 
-## OpenCode Mode
+### OpenCode repair
 
 OpenCode mode asks a coding agent to diagnose the captured Grafana alert and produce the candidate repair.
 
@@ -175,6 +232,17 @@ OpenCode must change exactly:
 - `tests/ProductWorker.Smoke/Program.cs`
 
 The OpenCode path is implemented but still requires an independent live provider validation before production use.
+
+### Keep the environment
+
+Both `smoke` and `run` normally remove Compose containers and volumes while retaining `runs/<run-id>/`. Add `--keep` to preserve Kafka, Grafana, and their state for manual inspection:
+
+```bash
+dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
+  run --agent fixture --keep
+```
+
+Grafana is then available at [http://localhost:3000](http://localhost:3000) with `admin` / `admin`. Use the Compose project name from `run.json` when you are ready to remove the retained environment.
 
 ## Artifacts
 
@@ -249,7 +317,30 @@ Expected result:
 {"disposition":"processed","productId":"P-1","normalizedType":"physical","price":100,"reasonCode":null}
 ```
 
+## Repository Layout
+
+```text
+agent/                         Restricted repair task given to OpenCode
+docs/                          Compatibility notes and validated environment
+fixtures/known-good.patch      Deterministic repair oracle
+harness/dotnet/                C# CLI, orchestration, evidence, and artifacts
+infrastructure/                Compose, Grafana alert, agent image, and proxy policy
+src/ProductWorker/             Intentionally broken .NET Kafka worker
+tests/IncidentHarness.Tests/   Focused C# harness tests
+tests/ProductWorker.Smoke/     Fast processor and ledger executable checks
+tests/ProductWorker.Tests/     TUnit and Testcontainers functional test
+runs/                          Ignored, retained experiment artifacts
+```
+
+## From POC to Production
+
+This harness is a proof of concept for a capability that could run inside a company's incident-response platform. In a production environment, the agent would correlate a much larger stream of signals across message brokers, REST and gRPC calls, microservices, GitHub repositories, deployment history, and Kubernetes clusters. It would also need service ownership data, secure read-only access, strict isolation, audit trails, approval gates, and reliable handling of incomplete or conflicting evidence.
+
+The goal is not necessarily autonomous deployment. A useful first step is an automated first responder that begins investigating as soon as an alert fires. Before the first developer opens Grafana or Datadog, they could receive a report describing the affected service and request path, the evidence already checked, the most likely root cause, the confidence and remaining unknowns, and a proposed code or operational fix. The developer still makes the decision, but starts with a tested hypothesis instead of an empty dashboard.
+
 ## Current Boundaries
+
+This is an experiment harness, not a production deployment system. Current limits are intentional and visible:
 
 - Fixed host ports prevent concurrent local experiments.
 - macOS and Linux are supported; Windows process and filesystem behavior is not implemented.
@@ -257,4 +348,4 @@ Expected result:
 - Candidate execution uses frozen SDK-image build output rather than a runtime-only image.
 - Recovery telemetry stability, crash injection between persistence and commit, model-authored post-mortems, and OpenCode session continuation are not implemented.
 
-See [`docs/compatibility.md`](docs/compatibility.md) for validated versions and platform details. The previous README is retained as [`README-old.md`](README-old.md).
+See [`docs/compatibility.md`](docs/compatibility.md) for validated versions and platform details.
