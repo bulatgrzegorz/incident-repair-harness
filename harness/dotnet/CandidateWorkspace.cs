@@ -11,7 +11,7 @@ public static class CandidateWorkspace
     private static readonly HashSet<string> AllowedChanges =
     [
         "src/ProductWorker/ProductProcessor.cs",
-        "tests/ProductWorker.Smoke/Program.cs",
+        "tests/ProductWorker.Tests/ProductProcessingTests.cs",
     ];
 
     public static async Task<string> Prepare(
@@ -77,18 +77,19 @@ public static class CandidateWorkspace
         string root,
         string candidate,
         string runDirectory,
+        string network,
         CancellationToken cancellationToken = default)
     {
         var redControl = Path.Combine(runDirectory, "red-control");
         CopyWorkspace(root, candidate, redControl);
         var redOutput = Path.Combine(runDirectory, "red-control.log");
-        var redResult = await RunSmokeTests(runtime, redControl, false, redOutput, cancellationToken);
+        var redResult = await RunFunctionalTests(runtime, redControl, network, false, redOutput, cancellationToken);
         if (redResult.ExitCode == 0 || !File.ReadAllText(redOutput).Contains("NullReferenceException", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Regression check was not red against the original processor");
         }
 
-        await RunSmokeTests(runtime, candidate, true, Path.Combine(runDirectory, "candidate-test.log"), cancellationToken);
+        await RunFunctionalTests(runtime, candidate, network, true, Path.Combine(runDirectory, "candidate-test.log"), cancellationToken);
 
         var policyResults = new JsonArray();
         foreach (var payload in new[]
@@ -191,15 +192,22 @@ public static class CandidateWorkspace
         IEnumerable<string> arguments,
         bool check,
         string? output = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string network = "none",
+        IEnumerable<string>? environment = null)
     {
-        var command = new List<string> { "run", "--rm", "--network", "none", "--read-only" };
+        var command = new List<string> { "run", "--rm", "--network", network, "--read-only" };
         command.AddRange(runtime.UserArguments);
         command.AddRange([
             "--cap-drop=all", "--security-opt=no-new-privileges", "--pids-limit=256", "--memory=3g",
             "--tmpfs", "/tmp:rw,size=512m", "--tmpfs", "/home/agent:rw,mode=1777,size=256m",
-            "--volume", $"{directory}:/workspace:rw", Agent.AgentImage, "dotnet",
+            "--volume", $"{directory}:/workspace:rw",
         ]);
+        foreach (var value in environment ?? [])
+        {
+            command.AddRange(["--env", value]);
+        }
+        command.AddRange([Agent.AgentImage, "dotnet"]);
         command.AddRange(arguments);
         if (output is null)
         {
@@ -221,19 +229,26 @@ public static class CandidateWorkspace
         return new CommandResult(exitCode, "", "");
     }
 
-    private static Task<CommandResult> RunSmokeTests(
+    private static Task<CommandResult> RunFunctionalTests(
         ContainerRuntime runtime,
         string directory,
+        string network,
         bool check,
         string output,
         CancellationToken cancellationToken) =>
         ContainerDotnet(
             runtime,
             directory,
-            ["run", "--project", "tests/ProductWorker.Smoke/ProductWorker.Smoke.csproj", "--configuration", "Release", "--property:RestoreLockedMode=true"],
+            ["run", "--project", "tests/ProductWorker.Tests/ProductWorker.Tests.csproj", "--configuration", "Release", "--property:RestoreLockedMode=true"],
             check,
             output,
-            cancellationToken);
+            cancellationToken,
+            network,
+            [
+                "FUNCTIONAL_TESTS_MODE=External",
+                "FUNCTIONAL_TESTS_KAFKA_ENDPOINT=broker:19092",
+                "FUNCTIONAL_TESTS_OTLP_ENDPOINT=http://lgtm:4318",
+            ]);
 
     private static Task<CommandResult> RunPolicyCheck(
         ContainerRuntime runtime,

@@ -137,10 +137,11 @@ public static class Experiment
             var candidate = await CandidateWorkspace.Prepare(root, runDirectory, agent, model, credentialEnvironment, commandLog, cancellationToken);
             Artifacts.Phase(runDirectory, "frozen");
 
-            Progress("Running red/green and malformed-input checks");
-            var runtimeCandidate = await CandidateWorkspace.Test(runtime, root, candidate, runDirectory, cancellationToken);
+            Progress("Running functional red/green and malformed-input checks");
+            var runtimeCandidate = await CandidateWorkspace.Test(
+                runtime, root, candidate, runDirectory, $"{project}_application", cancellationToken);
             Artifacts.Phase(runDirectory, "tested");
-            ConsoleUi.Insight("Repair accepted", "regression went red to green; 4 malformed-input policies passed");
+            ConsoleUi.Insight("Repair accepted", "functional regression went red to green; 4 malformed-input policies passed");
 
             Progress("Replacing the worker and verifying recovery");
             environment["SERVICE_INSTANCE_ID"] = $"candidate-{Guid.NewGuid():N}";

@@ -225,7 +225,9 @@ The coding container receives only the candidate workspace, captured alert, and 
 OpenCode must change exactly:
 
 - `src/ProductWorker/ProductProcessor.cs`
-- `tests/ProductWorker.Smoke/Program.cs`
+- `tests/ProductWorker.Tests/ProductProcessingTests.cs`
+
+The regression must drive the worker through Kafka and assert durable output and committed offsets. The harness executes it against the original source as a red control and against the candidate on the isolated application network.
 
 The OpenCode path is implemented but still requires an independent live provider validation before production use.
 
@@ -248,8 +250,8 @@ Successful runs retain evidence under `runs/<run-id>/`:
 - `incident.json`: blocked offset, retries, restart, and Grafana alert
 - `source.diff`: exact repair under test
 - `candidate-source-manifest.json`: frozen source sizes and hashes
-- `red-control.log`: proof that the regression fails on the original source
-- `candidate-test.log`: repaired candidate smoke result
+- `red-control.log`: proof that the functional regression fails on the original source
+- `candidate-test.log`: repaired candidate functional-test result
 - `policy-results.json`: malformed-input policy results
 - `verification.json`: recovery checks
 - `output/processed-products.json`: final durable ledger

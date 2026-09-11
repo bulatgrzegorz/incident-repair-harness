@@ -48,7 +48,7 @@ dotnet run --project tests/ProductWorker.Tests/ProductWorker.Tests.csproj \
 
 On this Podman machine, local Testcontainers mode additionally uses the Podman API socket as `DOCKER_HOST` and disables Ryuk. A manual external-mode spike also passed inside the pinned SDK image with no Docker socket or client, against the internal `broker:19092` and `aspire:18889` endpoints.
 
-The external-mode spike is not part of the main harness workflow. It used a prepared local NuGet feed, `infrastructure/functional-compose.yaml`, and fresh writable package, build, and result directories outside a read-only source mount.
+The main harness now uses the same external test mode against the experiment's existing Kafka and LGTM services to run the agent-authored regression as both a red control and candidate check.
 
 The exact commands inside the no-Docker external SDK container are:
 

@@ -13,37 +13,26 @@ diff --git a/src/ProductWorker/ProductProcessor.cs b/src/ProductWorker/ProductPr
          var normalizedType = productType!.Trim().ToLowerInvariant();
  
          return normalizedType is "physical" or "digital"
-diff --git a/tests/ProductWorker.Smoke/Program.cs b/tests/ProductWorker.Smoke/Program.cs
---- a/tests/ProductWorker.Smoke/Program.cs
-+++ b/tests/ProductWorker.Smoke/Program.cs
-@@ -5,6 +5,13 @@ static ProcessingResult Process(string json) => ProductProcessor.Process(Encoding.UTF8.GetBytes(json));
+diff --git a/tests/ProductWorker.Tests/ProductProcessingTests.cs b/tests/ProductWorker.Tests/ProductProcessingTests.cs
+--- a/tests/ProductWorker.Tests/ProductProcessingTests.cs
++++ b/tests/ProductWorker.Tests/ProductProcessingTests.cs
+@@ -24,6 +24,19 @@ public partial class ProductProcessingTests
+         await Assert.That(ledger.Records[0].NormalizedType).IsEqualTo("physical");
+     }
  
- var physical = Process("""{"productId":"P-1","productType":"Physical","price":100}""");
- var unsupported = Process("""{"productId":"P-2","productType":"Service","price":25.50}""");
-+var missingTypes = new[]
-+{
-+    """{"productId":"P-3","price":10}""",
-+    """{"productId":"P-3","productType":null,"price":10}""",
-+    """{"productId":"P-3","productType":"","price":10}""",
-+    """{"productId":"P-3","productType":"  ","price":10}""",
-+};
- 
- if (physical != ProcessingResult.Processed("P-1", "physical", 100m))
- {
-@@ -16,6 +23,16 @@ if (unsupported != ProcessingResult.Rejected("P-2", "unsupported_product_type"))
-     throw new Exception($"Unexpected unsupported result: {unsupported}");
- }
- 
-+foreach (var payload in missingTypes)
-+{
-+    var missing = Process(payload);
-+
-+    if (missing != ProcessingResult.Rejected("P-3", "missing_product_type"))
++    [Test]
++    public async Task MissingProductTypeIsRejectedAndNextProductIsProcessed()
 +    {
-+        throw new Exception($"Unexpected missing-type result: {missing}");
-+    }
-+}
++        var ledger = await RunScenario(
++            """{"productId":"P-2","price":10}""",
++            """{"productId":"P-3","productType":"Digital","price":20}""");
 +
- var outputDirectory = Path.Combine(Path.GetTempPath(), $"product-worker-smoke-{Guid.NewGuid():N}");
- try
- {
++        await Assert.That(ledger.Records[0].Disposition).IsEqualTo("rejected");
++        await Assert.That(ledger.Records[0].ReasonCode).IsEqualTo("missing_product_type");
++        await Assert.That(ledger.Records[1].Disposition).IsEqualTo("processed");
++        await Assert.That(ledger.Records[1].ProductId).IsEqualTo("P-3");
++    }
++
+     private async Task<LedgerDocument> RunScenario(params string[] payloads)
+     {
+         var id = Guid.NewGuid().ToString("N");
