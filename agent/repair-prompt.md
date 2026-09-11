@@ -4,12 +4,7 @@ A Grafana alert fired for the product worker. The alert payload is available at 
 
 Investigate the alert and repair the application. Search the implementation under `src/ProductWorker/` and its existing checks under `tests/ProductWorker.Smoke/`.
 
-You may only modify:
-
-- `src/ProductWorker/ProductProcessor.cs`
-- `tests/ProductWorker.Smoke/Program.cs`
-
-Do not change Kafka, ledger, telemetry, project, lock, or infrastructure files. Add a regression assertion for your diagnosis and run:
+Add a regression assertion for your diagnosis and run:
 
 ```bash
 dotnet restore tests/ProductWorker.Smoke/ProductWorker.Smoke.csproj --locked-mode

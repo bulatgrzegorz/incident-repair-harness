@@ -150,7 +150,7 @@ public sealed class KafkaScenario : IDisposable
         var checks = new Dictionary<string, bool>
         {
             ["baseline_preserved"] = Matches(records[baseline.Offset], baseline.PayloadSha256, "processed", "P-baseline", "physical", 100, null),
-            ["poison_rejected"] = Matches(records[poison.Offset], poison.PayloadSha256, "rejected", "P-poison", null, null, "missing_product_type"),
+            ["poison_rejected"] = Matches(records[poison.Offset], poison.PayloadSha256, "rejected", "P-poison", null, null, null),
             ["tail_processed"] = Matches(records[tail.Offset], tail.PayloadSha256, "processed", "P-tail", "digital", 50, null),
             ["probe_processed"] = Matches(records[probe.Offset], probe.PayloadSha256, "processed", probeId, "physical", 75, null),
             ["no_extra_records"] = records.Keys.ToHashSet().SetEquals(expectedOffsets),

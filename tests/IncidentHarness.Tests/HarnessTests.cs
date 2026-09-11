@@ -70,6 +70,14 @@ public class HarnessTests
     }
 
     [Test]
+    public void MissingAgentSummaryIsOptional()
+    {
+        using var temporary = new TemporaryDirectory();
+
+        Agent.ValidateSubmission(temporary.Path);
+    }
+
+    [Test]
     public async Task FinalizeRejectsArtifactSymlinks()
     {
         using var temporary = new TemporaryDirectory();

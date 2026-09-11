@@ -54,11 +54,9 @@ Run all commands from the repository root:
 git clone https://github.com/bulatgrzegorz/incident-repair-harness.git
 cd incident-repair-harness
 
-dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
-  prepare --agent fixture
+dotnet run --project harness/dotnet/IncidentHarness.csproj -- prepare --agent fixture
 dotnet run --project harness/dotnet/IncidentHarness.csproj -- doctor
-dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
-  run --agent fixture
+dotnet run --project harness/dotnet/IncidentHarness.csproj -- run --agent fixture
 ```
 
 `prepare` builds the restricted SDK image used to compile, test, and run repair candidates. It comes before `doctor` because the prepared image is one of the checks.
@@ -87,7 +85,7 @@ The important behavior is not merely the exception. The committed-next offset st
 
 ```mermaid
 sequenceDiagram
-    participant H as C# harness
+    participant H as Harness
     participant K as Kafka
     participant W as Broken worker
     participant L as Output ledger
@@ -153,7 +151,7 @@ The repair gates are designed to prevent a superficially green result:
 - Symlinks, hard links, oversized files, and unexpected source changes are rejected.
 - The regression fails against the original processor with `NullReferenceException`.
 - The same regression passes against the candidate.
-- Missing, null, empty, and whitespace `productType` values produce `missing_product_type`.
+- Missing, null, empty, and whitespace `productType` values are rejected without throwing.
 - The candidate runs read-only, non-root, capability-free, and without package-restore network access.
 - The original baseline remains preserved.
 - The poison record is rejected and the known tail record is processed.
@@ -210,11 +208,9 @@ Use a dedicated low-budget provider key:
 ```bash
 export OPENAI_API_KEY=...
 
-dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
-  prepare --agent opencode
+dotnet run --project harness/dotnet/IncidentHarness.csproj -- prepare --agent opencode
 
-dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
-  doctor --agent opencode
+dotnet run --project harness/dotnet/IncidentHarness.csproj -- doctor --agent opencode
 
 dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
   run --agent opencode \
@@ -238,8 +234,7 @@ The OpenCode path is implemented but still requires an independent live provider
 Both `smoke` and `run` normally remove Compose containers and volumes while retaining `runs/<run-id>/`. Add `--keep` to preserve Kafka, Grafana, and their state for manual inspection:
 
 ```bash
-dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
-  run --agent fixture --keep
+dotnet run --project harness/dotnet/IncidentHarness.csproj -- run --agent fixture --keep
 ```
 
 Grafana is then available at [http://localhost:3000](http://localhost:3000) with `admin` / `admin`. Use the Compose project name from `run.json` when you are ready to remove the retained environment.
@@ -314,7 +309,13 @@ dotnet run --project src/ProductWorker/ProductWorker.csproj -- \
 Expected result:
 
 ```json
-{"disposition":"processed","productId":"P-1","normalizedType":"physical","price":100,"reasonCode":null}
+{
+  "disposition":"processed",
+  "productId":"P-1",
+  "normalizedType":"physical",
+  "price":100,
+  "reasonCode":null
+}
 ```
 
 ## Repository Layout

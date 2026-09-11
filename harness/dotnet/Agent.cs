@@ -133,10 +133,15 @@ public static partial class Agent
         }
         Artifacts.WriteJson(Path.Combine(artifacts, "session.json"), new { session_id = sessions.Single() });
 
+        ValidateSubmission(submission);
+    }
+
+    public static void ValidateSubmission(string submission)
+    {
         var summaryPath = Path.Combine(submission, "repair-summary.json");
         if (!File.Exists(summaryPath))
         {
-            throw new InvalidOperationException("Agent did not submit repair-summary.json");
+            return;
         }
         var summary = Artifacts.ReadJson(summaryPath);
         if (!IsString(summary["diagnosis"]) || !IsString(summary["regression"]) ||

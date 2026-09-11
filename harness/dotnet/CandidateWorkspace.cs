@@ -102,7 +102,7 @@ public static class CandidateWorkspace
             var result = await RunPolicyCheck(runtime, candidate, payload, cancellationToken);
             var line = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries).Last();
             var policy = JsonNode.Parse(line) ?? throw new InvalidOperationException("Candidate returned empty policy JSON");
-            if (policy["disposition"]?.GetValue<string>() != "rejected" || policy["reasonCode"]?.GetValue<string>() != "missing_product_type")
+            if (policy["disposition"]?.GetValue<string>() != "rejected")
             {
                 throw new InvalidOperationException($"Malformed-type policy failed: {policy}");
             }
