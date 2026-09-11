@@ -57,8 +57,14 @@ public sealed class WorkerTelemetry : IDisposable
         _meterProvider = Sdk.CreateMeterProviderBuilder()
             .SetResourceBuilder(resource)
             .AddMeter(MeterName)
-            .AddOtlpExporter((_, reader) =>
-                reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 1_000)
+            .AddOtlpExporter((options, reader) =>
+            {
+                if (settings.OtlpEndpoint is not null)
+                {
+                    options.Endpoint = settings.OtlpEndpoint;
+                }
+                reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 1_000;
+            })
             .Build();
         var tracing = Sdk.CreateTracerProviderBuilder()
             .SetResourceBuilder(resource)
@@ -69,7 +75,13 @@ public sealed class WorkerTelemetry : IDisposable
         _loggerFactory = LoggerFactory.Create(builder => builder.AddOpenTelemetry(options =>
         {
             options.SetResourceBuilder(resource);
-            options.AddOtlpExporter();
+            options.AddOtlpExporter(exporter =>
+            {
+                if (settings.OtlpEndpoint is not null)
+                {
+                    exporter.Endpoint = settings.OtlpEndpoint;
+                }
+            });
         }));
         _logger = _loggerFactory.CreateLogger("ProductWorker");
     }
@@ -125,7 +137,7 @@ public sealed class WorkerTelemetry : IDisposable
         return body;
     }
 
-    public void ObserveBroker(IConsumer<Ignore, byte[]> consumer, TopicPartition partition)
+    public void RefreshBrokerMetrics(IConsumer<Ignore, byte[]> consumer, TopicPartition partition)
     {
         try
         {
@@ -143,6 +155,7 @@ public sealed class WorkerTelemetry : IDisposable
         }
         catch (KafkaException)
         {
+            // Telemetry collection must not interrupt record processing.
         }
     }
 

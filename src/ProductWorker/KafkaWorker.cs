@@ -59,7 +59,7 @@ public sealed class KafkaWorker(WorkerSettings settings) : BackgroundService
                 {
                     Console.Error.WriteLine(telemetry.Failed(record, exception));
                     consumer.Seek(record.TopicPartitionOffset);
-                    telemetry.ObserveBroker(consumer, record.TopicPartition);
+                    telemetry.RefreshBrokerMetrics(consumer, record.TopicPartition);
                     Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).GetAwaiter().GetResult();
                     continue;
                 }
@@ -67,7 +67,7 @@ public sealed class KafkaWorker(WorkerSettings settings) : BackgroundService
                 ledger.Append(record.Topic, record.Partition.Value, record.Offset.Value, hash, result);
                 consumer.Commit(record);
                 telemetry.Completed(result);
-                telemetry.ObserveBroker(consumer, record.TopicPartition);
+                telemetry.RefreshBrokerMetrics(consumer, record.TopicPartition);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
