@@ -1,0 +1,133 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title description">
+  <title id="title">Incident Repair Harness</title>
+  <desc id="description">A poison Kafka record is detected, repaired, independently verified, and documented.</desc>
+  <defs>
+    <linearGradient id="background" x1="70" y1="0" x2="1130" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111827"/>
+      <stop offset="0.5" stop-color="#080D17"/>
+      <stop offset="1" stop-color="#101A18"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="104" y1="0" x2="1096" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF5A67"/>
+      <stop offset="0.29" stop-color="#F59E0B"/>
+      <stop offset="0.53" stop-color="#38BDF8"/>
+      <stop offset="0.76" stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#36D399"/>
+    </linearGradient>
+    <radialGradient id="redGlow" cx="0" cy="0" r="1" gradientTransform="translate(168 314) rotate(90) scale(235)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EF4454" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#EF4454" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="greenGlow" cx="0" cy="0" r="1" gradientTransform="translate(1040 320) rotate(90) scale(250)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#36D399" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#36D399" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" stroke="#94A3B8" stroke-opacity="0.045"/>
+    </pattern>
+  </defs>
+
+  <rect x="1" y="1" width="1198" height="628" rx="28" fill="url(#background)" stroke="#263247" stroke-width="2"/>
+  <rect x="1" y="1" width="1198" height="628" rx="28" fill="url(#grid)"/>
+  <rect x="1" y="1" width="1198" height="628" rx="28" fill="url(#redGlow)"/>
+  <rect x="1" y="1" width="1198" height="628" rx="28" fill="url(#greenGlow)"/>
+
+  <g font-family="Inter, Segoe UI, Arial, sans-serif">
+    <g transform="translate(64 50)">
+      <rect width="238" height="32" rx="16" fill="#172033" stroke="#31405A"/>
+      <circle cx="18" cy="16" r="4" fill="#38BDF8"/>
+      <text x="32" y="21" fill="#A9B8CE" font-size="12" font-weight="700" letter-spacing="1.5">INCIDENT REPAIR / LAB</text>
+    </g>
+
+    <g transform="translate(974 49)">
+      <rect width="162" height="34" rx="17" fill="#0E2B24" stroke="#246B56"/>
+      <circle cx="19" cy="17" r="5" fill="#36D399"/>
+      <circle cx="19" cy="17" r="10" fill="#36D399" fill-opacity="0.17"/>
+      <text x="36" y="22" fill="#8BF0C8" font-size="12" font-weight="800" letter-spacing="1.4">RESOLVED</text>
+    </g>
+
+    <text x="64" y="144" fill="#F8FAFC" font-size="52" font-weight="800" letter-spacing="-1.8">Break it. Detect it. Repair it.</text>
+    <text x="64" y="201" fill="url(#signal)" font-size="52" font-weight="800" letter-spacing="-1.8">Then prove it.</text>
+    <text x="66" y="238" fill="#91A0B6" font-size="17">A deterministic, evidence-first incident experiment for a blocked Kafka consumer.</text>
+
+    <path d="M105 343H1095" stroke="#273449" stroke-width="4" stroke-linecap="round"/>
+    <path d="M105 343H1095" stroke="url(#signal)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M105 343H168L185 316L211 375L237 330L263 343H1095" stroke="url(#signal)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <g filter="url(#softGlow)" opacity="0.4">
+      <circle cx="125" cy="343" r="17" fill="#FF5A67"/>
+      <circle cx="362" cy="343" r="17" fill="#F59E0B"/>
+      <circle cx="600" cy="343" r="17" fill="#38BDF8"/>
+      <circle cx="838" cy="343" r="17" fill="#A78BFA"/>
+      <circle cx="1075" cy="343" r="17" fill="#36D399"/>
+    </g>
+
+    <g filter="url(#shadow)">
+      <g transform="translate(64 292)">
+        <rect width="122" height="102" rx="14" fill="#151C2A" stroke="#4C2935"/>
+        <circle cx="61" cy="51" r="22" fill="#321B25" stroke="#FF5A67" stroke-width="2"/>
+        <path d="M61 38V55M61 64V65" stroke="#FF7B85" stroke-width="4" stroke-linecap="round"/>
+      </g>
+      <g transform="translate(301 292)">
+        <rect width="122" height="102" rx="14" fill="#151C2A" stroke="#55401D"/>
+        <path d="M42 63L61 35L80 63H42Z" fill="#322614" stroke="#F59E0B" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M61 45V54M61 59V60" stroke="#FFC45A" stroke-width="3" stroke-linecap="round"/>
+      </g>
+      <g transform="translate(539 292)">
+        <rect width="122" height="102" rx="14" fill="#151C2A" stroke="#24516A"/>
+        <path d="M43 58L54 69L80 41" stroke="#38BDF8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M46 39H78" stroke="#38BDF8" stroke-opacity="0.35" stroke-width="2"/>
+      </g>
+      <g transform="translate(777 292)">
+        <rect width="122" height="102" rx="14" fill="#151C2A" stroke="#4D3D75"/>
+        <path d="M43 58L55 70L81 42" stroke="#A78BFA" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="62" cy="56" r="25" stroke="#A78BFA" stroke-opacity="0.3" stroke-width="2"/>
+      </g>
+      <g transform="translate(1014 292)">
+        <rect width="122" height="102" rx="14" fill="#151C2A" stroke="#246B56"/>
+        <path d="M47 39H76L84 47V70H47V39Z" fill="#173129" stroke="#36D399" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M55 52H76M55 60H72" stroke="#8BF0C8" stroke-width="2" stroke-linecap="round"/>
+      </g>
+    </g>
+
+    <g font-size="12" font-weight="800" letter-spacing="1.5" text-anchor="middle">
+      <text x="125" y="421" fill="#FF7B85">01 / INJECT</text>
+      <text x="362" y="421" fill="#FFC45A">02 / ALERT</text>
+      <text x="600" y="421" fill="#71D2F9">03 / REPAIR</text>
+      <text x="838" y="421" fill="#C4B5FD">04 / VERIFY</text>
+      <text x="1075" y="421" fill="#8BF0C8">05 / REPORT</text>
+    </g>
+    <g fill="#77869D" font-size="12" text-anchor="middle">
+      <text x="125" y="444">poison record</text>
+      <text x="362" y="444">Grafana evidence</text>
+      <text x="600" y="444">isolated candidate</text>
+      <text x="838" y="444">live broker state</text>
+      <text x="1075" y="444">post-mortem</text>
+    </g>
+
+    <g transform="translate(64 498)">
+      <rect width="1072" height="84" rx="16" fill="#0C1320" stroke="#243147"/>
+      <path d="M214 18V66M428 18V66M642 18V66M856 18V66" stroke="#243147"/>
+      <g font-size="11" font-weight="700" letter-spacing="1.2" fill="#687990">
+        <text x="24" y="31">RUNTIME</text>
+        <text x="238" y="31">FAILURE</text>
+        <text x="452" y="31">CONTROL</text>
+        <text x="666" y="31">RECOVERY</text>
+        <text x="880" y="31">EVIDENCE</text>
+      </g>
+      <g font-size="15" font-weight="700" fill="#DCE5F2">
+        <text x="24" y="57">.NET 10 + Kafka 4</text>
+        <text x="238" y="57">restart-persistent</text>
+        <text x="452" y="57">red / green</text>
+        <text x="666" y="57">offset drained</text>
+        <text x="880" y="57">SHA-256 manifest</text>
+      </g>
+    </g>
+  </g>
+</svg>

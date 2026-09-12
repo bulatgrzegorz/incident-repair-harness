@@ -73,4 +73,4 @@ The Podman internal network also failed to resolve `host.containers.internal` an
 
 A local corrected-prompt `openai/gpt-5.4-mini` run completed through the allowlisted proxy. The agent received only Grafana's `alert.json` plus source/test locations, diagnosed the null dereference, changed only the two permitted files, passed the red/green and four-variant policy gates, and resolved the preserved incident through the random probe.
 
-Prometheus `timestamp(...)` freshness checks, recovery telemetry/stability, automated Aspire trace ingestion inspection, the complete functional scenario matrix, runtime-only worker packaging, and OpenCode session continuation/post-mortem generation remain untested. Pin or widen nothing until its corresponding spike passes.
+Prometheus `timestamp(...)` freshness checks, recovery telemetry/stability, automated Aspire trace ingestion inspection, the complete functional scenario matrix, runtime-only worker packaging, and live OpenCode session continuation/post-mortem generation remain untested. Pin or widen nothing until its corresponding spike passes.

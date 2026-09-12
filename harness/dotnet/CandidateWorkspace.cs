@@ -25,9 +25,10 @@ public static class CandidateWorkspace
     {
         var candidate = Path.Combine(runDirectory, "candidate");
         CopyWorkspace(root, root, candidate);
-        var patch = Path.Combine(root, "fixtures/known-good.patch");
+        
         if (agent == "fixture")
         {
+            var patch = Path.Combine(root, "fixtures/known-good.patch");
             await ProcessRunner.Run("patch", ["-p1", "-i", patch], TimeSpan.FromSeconds(30), candidate, logPath: commandLog, cancellationToken: cancellationToken);
             File.Copy(patch, Path.Combine(runDirectory, "source.diff"));
         }

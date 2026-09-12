@@ -31,15 +31,18 @@ public static partial class Artifacts
     public static void FinalizeSuccess(string runDirectory, string mode)
     {
         _ = SafeFiles(runDirectory).ToArray();
+        var reportCreated = File.Exists(Path.Combine(runDirectory, "post-mortem.md"));
         Phase(runDirectory, "finalized");
         WriteJson(Path.Combine(runDirectory, "verdict.json"), new
         {
             schema_version = 1,
             outcome = "resolved",
             mode,
-            report_status = "not_requested",
-            experiment_complete = false,
-            reason = "Repair verified; model-authored post-mortem is not implemented yet.",
+            report_status = reportCreated ? "created" : "not_requested",
+            experiment_complete = reportCreated,
+            reason = reportCreated
+                ? "Repair verified and model-authored post-mortem created."
+                : "Repair verified; fixture runs do not request a model-authored post-mortem.",
         });
 
         var entries = SafeFiles(runDirectory)

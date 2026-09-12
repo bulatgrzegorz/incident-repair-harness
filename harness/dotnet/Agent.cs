@@ -45,83 +45,14 @@ public static partial class Agent
         string credentialEnvironment,
         CancellationToken cancellationToken = default)
     {
-        var provider = model.Split('/', 2)[0];
-        if (provider is not ("openai" or "anthropic"))
-        {
-            throw new ArgumentException("Only openai/* and anthropic/* are allowlisted");
-        }
-        if (!CredentialName().IsMatch(credentialEnvironment))
-        {
-            throw new ArgumentException("Invalid credential environment variable name");
-        }
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(credentialEnvironment)))
-        {
-            throw new ArgumentException($"Missing credential environment variable: {credentialEnvironment}");
-        }
-
-        var runtime = await IncidentHarness.ContainerRuntime.Detect(cancellationToken);
-        var suffix = Guid.NewGuid().ToString("N")[..8];
-        var network = $"incident-agent-{suffix}";
-        var proxy = $"incident-proxy-{suffix}";
-        var coding = $"incident-coding-{suffix}";
-        var config = JsonSerializer.Serialize(new
-        {
-            autoupdate = false,
-            share = "disabled",
-            snapshot = false,
-            plugin = Array.Empty<string>(),
-            mcp = new { },
-            enabled_providers = new[] { provider },
-            model,
-            small_model = model,
-            permission = new Dictionary<string, object>
-            {
-                ["webfetch"] = "deny",
-                ["websearch"] = "deny",
-                ["codesearch"] = "deny",
-                ["task"] = "deny",
-                ["external_directory"] = new Dictionary<string, string> { ["/submission/**"] = "allow" },
-            },
-        });
+        ValidateProviderAccess(model, credentialEnvironment);
         var prompt = File.ReadAllText(Path.Combine(root, "agent/repair-prompt.md"));
+        var state = Path.Combine(artifacts, "opencode-state");
         Directory.CreateDirectory(submission);
-        try
-        {
-            await runtime.Run(["network", "create", "--internal", network], TimeSpan.FromSeconds(30), cancellationToken: cancellationToken);
-            await RunProxyContainer(runtime, root, proxy, cancellationToken);
-            await runtime.Run(["network", "connect", network, proxy], TimeSpan.FromSeconds(30), cancellationToken: cancellationToken);
-            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-
-            var exitCode = await RunCodingContainer(
-                runtime,
-                coding,
-                network,
-                proxy,
-                candidate,
-                evidence,
-                submission,
-                artifacts,
-                credentialEnvironment,
-                config,
-                model,
-                prompt,
-                cancellationToken);
-            if (exitCode != 0)
-            {
-                throw new InvalidOperationException($"OpenCode exited with {exitCode}");
-            }
-        }
-        finally
-        {
-            await BestEffort(async () =>
-            {
-                var proxyLog = await runtime.Run(["logs", proxy], TimeSpan.FromSeconds(30), check: false);
-                await File.WriteAllTextAsync(Path.Combine(artifacts, "proxy.log"), proxyLog.StandardOutput + proxyLog.StandardError);
-            });
-            await BestEffort(() => runtime.Run(["rm", "--force", coding], TimeSpan.FromSeconds(30), check: false));
-            await BestEffort(() => runtime.Run(["rm", "--force", proxy], TimeSpan.FromSeconds(30), check: false));
-            await BestEffort(() => runtime.Run(["network", "rm", network], TimeSpan.FromSeconds(30), check: false));
-        }
+        Directory.CreateDirectory(state);
+        await RunRestrictedOpenCode(
+            root, candidate, evidence, submission, artifacts, state, model, credentialEnvironment,
+            prompt, "repair", null, cancellationToken);
 
         var sessions = File.ReadLines(Path.Combine(artifacts, "repair-stdout.ndjson"))
             .Select(ParseSession)
@@ -134,6 +65,37 @@ public static partial class Agent
         Artifacts.WriteJson(Path.Combine(artifacts, "session.json"), new { session_id = sessions.Single() });
 
         ValidateSubmission(submission);
+    }
+
+    public static async Task WritePostMortem(
+        string root,
+        string candidate,
+        string runDirectory,
+        string model,
+        string credentialEnvironment,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateProviderAccess(model, credentialEnvironment);
+        var artifacts = Path.Combine(runDirectory, "agent");
+        var submission = Path.Combine(runDirectory, "submission");
+        var evidence = Path.Combine(runDirectory, "agent-evidence");
+        foreach (var name in new[] { "incident.json", "source.diff", "verification.json", "test-results.json" })
+        {
+            File.Copy(Path.Combine(runDirectory, name), Path.Combine(evidence, name), overwrite: true);
+        }
+
+        var session = Artifacts.ReadJson(Path.Combine(artifacts, "session.json"))["session_id"]?.GetValue<string>()
+            ?? throw new JsonException("Missing OpenCode session ID");
+        var state = Path.Combine(artifacts, "opencode-state");
+        var prompt = File.ReadAllText(Path.Combine(root, "agent/post-mortem-prompt.md"));
+        await RunRestrictedOpenCode(
+            root, candidate, evidence, submission, artifacts, state, model, credentialEnvironment,
+            prompt, "post-mortem", session, cancellationToken);
+
+        var report = Path.Combine(submission, "post-mortem.md");
+        ValidatePostMortem(report);
+        File.Move(report, Path.Combine(runDirectory, "post-mortem.md"), overwrite: true);
+        Directory.Delete(state, recursive: true);
     }
 
     public static void ValidateSubmission(string submission)
@@ -149,6 +111,69 @@ public static partial class Agent
             changed.Any(path => !IsString(path)))
         {
             throw new JsonException("Invalid repair-summary.json");
+        }
+    }
+
+    public static void ValidatePostMortem(string path)
+    {
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException("Agent did not submit post-mortem.md");
+        }
+        var report = File.ReadAllText(path);
+        foreach (var heading in new[] { "Summary", "Impact", "Timeline", "Root Cause", "Resolution", "Validation", "Follow-up Actions" })
+        {
+            if (!report.Contains($"## {heading}", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException($"post-mortem.md is missing the '{heading}' section");
+            }
+        }
+    }
+
+    private static async Task RunRestrictedOpenCode(
+        string root,
+        string candidate,
+        string evidence,
+        string submission,
+        string artifacts,
+        string state,
+        string model,
+        string credentialEnvironment,
+        string prompt,
+        string outputPrefix,
+        string? session,
+        CancellationToken cancellationToken)
+    {
+        var runtime = await IncidentHarness.ContainerRuntime.Detect(cancellationToken);
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var network = $"incident-agent-{suffix}";
+        var proxy = $"incident-proxy-{suffix}";
+        var coding = $"incident-coding-{suffix}";
+        try
+        {
+            await runtime.Run(["network", "create", "--internal", network], TimeSpan.FromSeconds(30), cancellationToken: cancellationToken);
+            await RunProxyContainer(runtime, root, proxy, cancellationToken);
+            await runtime.Run(["network", "connect", network, proxy], TimeSpan.FromSeconds(30), cancellationToken: cancellationToken);
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            var exitCode = await RunCodingContainer(
+                runtime, coding, network, proxy, candidate, evidence, submission, artifacts, state,
+                credentialEnvironment, CreateConfig(model), model, prompt, outputPrefix, session, cancellationToken);
+            if (exitCode != 0)
+            {
+                throw new InvalidOperationException($"OpenCode exited with {exitCode}");
+            }
+        }
+        finally
+        {
+            await BestEffort(async () =>
+            {
+                var proxyLog = await runtime.Run(["logs", proxy], TimeSpan.FromSeconds(30), check: false);
+                var name = outputPrefix == "repair" ? "proxy.log" : $"{outputPrefix}-proxy.log";
+                await File.WriteAllTextAsync(Path.Combine(artifacts, name), proxyLog.StandardOutput + proxyLog.StandardError);
+            });
+            await BestEffort(() => runtime.Run(["rm", "--force", coding], TimeSpan.FromSeconds(30), check: false));
+            await BestEffort(() => runtime.Run(["rm", "--force", proxy], TimeSpan.FromSeconds(30), check: false));
+            await BestEffort(() => runtime.Run(["network", "rm", network], TimeSpan.FromSeconds(30), check: false));
         }
     }
 
@@ -171,10 +196,13 @@ public static partial class Agent
         string evidence,
         string submission,
         string artifacts,
+        string state,
         string credentialEnvironment,
         string config,
         string model,
         string prompt,
+        string outputPrefix,
+        string? session,
         CancellationToken cancellationToken)
     {
         var command = new List<string>
@@ -185,22 +213,69 @@ public static partial class Agent
         command.AddRange([
             "--cap-drop=all", "--security-opt=no-new-privileges", "--pids-limit=256", "--memory=3g",
             "--tmpfs", "/tmp:rw,size=512m", "--tmpfs", "/home/agent:rw,mode=1777,size=512m",
-            "--volume", $"{candidate}:/workspace:rw",
+            "--volume", $"{candidate}:/workspace:{(session is null ? "rw" : "ro")}",
             "--volume", $"{evidence}:/workspace/evidence:ro",
             "--volume", $"{submission}:/submission:rw",
+            "--volume", $"{state}:/opencode-state:rw",
             "--env", $"HTTP_PROXY=http://{proxy}:3128",
             "--env", $"HTTPS_PROXY=http://{proxy}:3128",
             "--env", "NO_PROXY=",
+            "--env", "XDG_DATA_HOME=/opencode-state",
             "--env", credentialEnvironment,
             "--env", $"OPENCODE_CONFIG_CONTENT={config}",
-            AgentImage, "opencode", "run", "--pure", "--format", "json", "--model", model, "--dir", "/workspace", prompt,
+            AgentImage, "opencode", "run", "--pure", "--format", "json", "--model", model, "--dir", "/workspace",
         ]);
+        if (session is not null)
+        {
+            command.AddRange(["--session", session]);
+        }
+        command.Add(prompt);
         return runtime.RunToFiles(
             command,
             TimeSpan.FromMinutes(10),
-            Path.Combine(artifacts, "repair-stdout.ndjson"),
-            Path.Combine(artifacts, "repair-stderr.txt"),
+            Path.Combine(artifacts, $"{outputPrefix}-stdout.ndjson"),
+            Path.Combine(artifacts, $"{outputPrefix}-stderr.txt"),
             cancellationToken);
+    }
+
+    private static string CreateConfig(string model)
+    {
+        var provider = model.Split('/', 2)[0];
+        return JsonSerializer.Serialize(new
+        {
+            autoupdate = false,
+            share = "disabled",
+            snapshot = false,
+            plugin = Array.Empty<string>(),
+            mcp = new { },
+            enabled_providers = new[] { provider },
+            model,
+            small_model = model,
+            permission = new Dictionary<string, object>
+            {
+                ["webfetch"] = "deny",
+                ["websearch"] = "deny",
+                ["codesearch"] = "deny",
+                ["task"] = "deny",
+                ["external_directory"] = new Dictionary<string, string> { ["/submission/**"] = "allow" },
+            },
+        });
+    }
+
+    private static void ValidateProviderAccess(string model, string credentialEnvironment)
+    {
+        if (model.Split('/', 2)[0] is not ("openai" or "anthropic"))
+        {
+            throw new ArgumentException("Only openai/* and anthropic/* are allowlisted");
+        }
+        if (!CredentialName().IsMatch(credentialEnvironment))
+        {
+            throw new ArgumentException("Invalid credential environment variable name");
+        }
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(credentialEnvironment)))
+        {
+            throw new ArgumentException($"Missing credential environment variable: {credentialEnvironment}");
+        }
     }
 
     private static string? ParseSession(string line)

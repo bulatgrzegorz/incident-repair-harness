@@ -43,7 +43,7 @@ public static class Experiment
 
         Artifacts.Phase(runDirectory, "preflight");
 
-        var totalSteps = agent is null ? 4 : 8;
+        var totalSteps = agent == "opencode" ? 9 : agent is null ? 4 : 8;
         var currentStep = 0;
         var runTimer = Stopwatch.StartNew();
         var stepTimer = Stopwatch.StartNew();
@@ -179,6 +179,13 @@ public static class Experiment
                 policy_variants = new[] { "missing", "null", "empty", "whitespace" },
             });
             await runtime.CaptureLogs(candidateContainer, Path.Combine(runDirectory, "candidate-worker.log"), cancellationToken);
+            if (agent == "opencode")
+            {
+                Progress("Generating the post-mortem from verified evidence");
+                await Agent.WritePostMortem(
+                    root, candidate, runDirectory, model ?? "", credentialEnvironment ?? "", cancellationToken);
+                Artifacts.Phase(runDirectory, "reported");
+            }
             Artifacts.FinalizeSuccess(runDirectory, agent);
             ConsoleUi.StepDone(stepTimer.Elapsed);
             ConsoleUi.Success(
@@ -200,6 +207,18 @@ public static class Experiment
         }
         finally
         {
+            if (agent == "opencode")
+            {
+                await BestEffort(() =>
+                {
+                    var state = Path.Combine(runDirectory, "agent", "opencode-state");
+                    if (Directory.Exists(state))
+                    {
+                        Directory.Delete(state, recursive: true);
+                    }
+                    return Task.CompletedTask;
+                });
+            }
             if (worker is not null)
             {
                 await BestEffort(async () => await worker.DisposeAsync());

@@ -20,6 +20,29 @@ public class HarnessTests
     }
 
     [Test]
+    public async Task FinalizeMarksCreatedPostMortemComplete()
+    {
+        using var temporary = new TemporaryDirectory();
+        await File.WriteAllTextAsync(Path.Combine(temporary.Path, "post-mortem.md"), "report");
+
+        Artifacts.FinalizeSuccess(temporary.Path, "opencode");
+
+        var verdict = Artifacts.ReadJson(Path.Combine(temporary.Path, "verdict.json"));
+        await Assert.That(verdict["report_status"]!.GetValue<string>()).IsEqualTo("created");
+        await Assert.That(verdict["experiment_complete"]!.GetValue<bool>()).IsTrue();
+    }
+
+    [Test]
+    public async Task PostMortemRequiresAllContractSections()
+    {
+        using var temporary = new TemporaryDirectory();
+        var path = Path.Combine(temporary.Path, "post-mortem.md");
+        await File.WriteAllTextAsync(path, "## Summary\n");
+
+        await AssertFails(() => Agent.ValidatePostMortem(path), "Impact");
+    }
+
+    [Test]
     public async Task AlertSelectionIgnoresGrafanaNoDataAlert()
     {
         var noData = new JsonObject

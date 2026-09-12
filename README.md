@@ -1,33 +1,57 @@
 # Incident Repair Harness
 
-A deterministic local experiment that reproduces, detects, repairs, and verifies a Kafka consumer blocked by a poison record.
+<p align="center">
+  <img src="docs/assets/incident-repair-hero.svg" alt="Incident Repair Harness: break it, detect it, repair it, then prove it" width="100%">
+</p>
+
+<p align="center">
+  <strong>A real incident. Preserved state. A repair that has to earn the green.</strong><br>
+  Deterministically reproduce, detect, repair, verify, and document a Kafka consumer blocked by a poison record.
+</p>
+
+<p align="center">
+  <a href="#quick-start"><strong>Run the experiment</strong></a> &nbsp;|&nbsp;
+  <a href="#what-to-observe">See the failure</a> &nbsp;|&nbsp;
+  <a href="#repair-lifecycle">Inspect the proof gates</a> &nbsp;|&nbsp;
+  <a href="#artifacts">Explore the evidence</a>
+</p>
 
 We created it to test incident-repair workflows against a real failure rather than a toy code-editing task. Every run starts from the same intentional defect, preserves the broken Kafka and ledger state during repair, and records enough evidence to explain whether the repair actually restored progress.
 
 The harness and worker are implemented in C# on .NET 10. Kafka, Grafana LGTM, restricted repair candidates, and the optional coding agent run in containers.
 
-## Architecture at a Glance
+## What This Delivers
 
-```mermaid
-flowchart LR
-    H["C# harness"] -->|injects incident| K[Kafka]
-    K --> W[ProductWorker]
-    W --> L[Durable ledger]
-    W --> G[Grafana telemetry]
-    G -->|alert evidence| H
-    H -->|tests repair| C[Restricted candidate]
-    C -->|replaces broken worker| K
-```
-
-The main components are:
-
-- `harness/dotnet/`: Spectre.Console CLI and experiment orchestration
-- `src/ProductWorker/`: intentionally defective .NET Kafka worker
-- `tests/ProductWorker.Smoke/`: fast processor and ledger checks
-- `tests/ProductWorker.Tests/`: Kafka and telemetry functional tests
-- `tests/IncidentHarness.Tests/`: focused harness tests
-- `infrastructure/`: Compose, Grafana alerting, agent image, and proxy policy
-- `fixtures/known-good.patch`: deterministic repair used by fixture mode
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>Real failure mechanics</strong><br><br>
+      A poison record blocks an actual Kafka partition. Retries, lag, durable output, and committed offsets all behave as they would in production.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Observable detection</strong><br><br>
+      OpenTelemetry signals reach Grafana LGTM and a provisioned alert must fire before repair begins.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Preserved incident state</strong><br><br>
+      The repair faces the original broker, consumer group, blocked offset, and durable ledger. There is no clean-state shortcut.
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>Restricted repair</strong><br><br>
+      Fixture or OpenCode candidates run non-root, read-only, capability-free, network-restricted, and against a frozen source manifest.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Independent proof</strong><br><br>
+      Red control, green candidate, malformed-input policy checks, live recovery, a fresh random probe, and a drained partition.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Auditable result</strong><br><br>
+      Every run retains the exact diff, logs, checks, ledger, verdict, hashes, and an evidence-grounded post-mortem for OpenCode runs.
+    </td>
+  </tr>
+</table>
 
 ## Quick Start
 
@@ -142,7 +166,8 @@ flowchart LR
     H --> I[Run candidate and policy checks]
     I --> J[Replace worker]
     J --> K[Verify recovery and fresh probe]
-    K --> L[Finalize artifacts]
+    K --> L[Generate post-mortem]
+    L --> M[Finalize artifact manifest]
 ```
 
 The repair gates are designed to prevent a superficially green result:
@@ -220,7 +245,7 @@ dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
 
 `anthropic/<model>` is also allowlisted with an explicitly named credential variable such as `ANTHROPIC_API_KEY`.
 
-The coding container receives only the candidate workspace, captured alert, and repair prompt. Its network is routed through a provider-only Squid proxy. Web tools, search, MCP, and subagents are disabled. The credential value is passed through the named environment variable and is not written into command arguments or run artifacts.
+The coding container receives only the candidate workspace, captured alert, and repair prompt. After independent recovery verification, the same OpenCode session is continued with the candidate mounted read-only and the incident, diff, test, and verification evidence needed to write the post-mortem. Its network is routed through a provider-only Squid proxy. Web tools, search, MCP, and subagents are disabled. The credential value is passed through the named environment variable and is not written into command arguments or run artifacts; transient session state is deleted before finalization.
 
 OpenCode must change exactly:
 
@@ -254,6 +279,7 @@ Successful runs retain evidence under `runs/<run-id>/`:
 - `candidate-test.log`: repaired candidate functional-test result
 - `policy-results.json`: malformed-input policy results
 - `verification.json`: recovery checks
+- `post-mortem.md`: model-authored incident report grounded in verified evidence (OpenCode runs)
 - `output/processed-products.json`: final durable ledger
 - `verdict.json`: machine-readable outcome
 - `manifest.json`: retained artifact sizes and SHA-256 hashes
@@ -349,6 +375,6 @@ This is an experiment harness, not a production deployment system. Current limit
 - macOS and Linux are supported; Windows process and filesystem behavior is not implemented.
 - Alert detection verifies the active Grafana alert by name.
 - Candidate execution uses frozen SDK-image build output rather than a runtime-only image.
-- Recovery telemetry stability, crash injection between persistence and commit, model-authored post-mortems, and OpenCode session continuation are not implemented.
+- Recovery telemetry stability and crash injection between persistence and commit are not implemented.
 
 See [`docs/compatibility.md`](docs/compatibility.md) for validated versions and platform details.
