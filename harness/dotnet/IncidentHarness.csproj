@@ -9,4 +9,7 @@
     <PackageReference Include="Spectre.Console" />
     <PackageReference Include="Spectre.Console.Cli" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="IncidentHarness.Tests" />
+  </ItemGroup>
 </Project>

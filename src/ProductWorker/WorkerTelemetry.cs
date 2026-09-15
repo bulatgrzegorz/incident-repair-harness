@@ -132,6 +132,7 @@ public sealed class WorkerTelemetry : IDisposable
             offset = record.Offset.Value,
             exception_type = exception.GetType().FullName,
             exception_message = exception.Message,
+            stack_trace = exception.StackTrace,
         });
         _logger.LogError("{Failure}", body);
         return body;

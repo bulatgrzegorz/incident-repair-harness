@@ -245,7 +245,7 @@ dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
 
 `anthropic/<model>` is also allowlisted with an explicitly named credential variable such as `ANTHROPIC_API_KEY`.
 
-The coding container receives only the candidate workspace, captured alert, and repair prompt. After independent recovery verification, the same OpenCode session is continued with the candidate mounted read-only and the incident, diff, test, and verification evidence needed to write the post-mortem. Its network is routed through a provider-only Squid proxy. Web tools, search, MCP, and subagents are disabled. The credential value is passed through the named environment variable and is not written into command arguments or run artifacts; transient session state is deleted before finalization.
+The coding container receives only the candidate workspace, captured alert, structured worker failures with stack traces, captured Kafka records, and repair prompt. After independent recovery verification, the same OpenCode session is continued with the candidate mounted read-only and the incident, diff, test, and verification evidence needed to write the post-mortem. Its network is routed through a provider-only Squid proxy. Web tools, search, MCP, and subagents are disabled. The credential value is passed through the named environment variable and is not written into command arguments or run artifacts; transient session state is deleted before finalization.
 
 OpenCode must change exactly:
 

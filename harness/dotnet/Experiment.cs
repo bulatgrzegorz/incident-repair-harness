@@ -242,7 +242,7 @@ public static class Experiment
         string runId) =>
         new(StringComparer.Ordinal)
         {
-            ["KAFKA_BOOTSTRAP_SERVERS"] = "127.0.0.1:9092",
+            ["KAFKA_BOOTSTRAP_SERVERS"] = KafkaScenario.BootstrapServers,
             ["KAFKA_TOPIC"] = topic,
             ["KAFKA_GROUP_ID"] = group,
             ["OUTPUT_DIRECTORY"] = outputDirectory,

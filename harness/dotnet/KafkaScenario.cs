@@ -35,9 +35,9 @@ public sealed record LedgerDocument(int SchemaVersion, List<LedgerRecord> Record
 
 public sealed class KafkaScenario : IDisposable
 {
-    private const string BootstrapServers = "127.0.0.1:9092";
-    private readonly IAdminClient admin;
-    private readonly IProducer<Null, byte[]> producer;
+    public const string BootstrapServers = "127.0.0.1:9092";
+    private readonly IAdminClient _admin;
+    private readonly IProducer<Null, byte[]> _producer;
 
     public KafkaScenario(string topic, string group)
     {
@@ -45,10 +45,10 @@ public sealed class KafkaScenario : IDisposable
         Group = group;
         var adminConfig = new AdminClientConfig { BootstrapServers = BootstrapServers };
         adminConfig.Set("log_level", "0");
-        admin = new AdminClientBuilder(adminConfig).Build();
+        _admin = new AdminClientBuilder(adminConfig).Build();
         var producerConfig = new ProducerConfig { BootstrapServers = BootstrapServers };
         producerConfig.Set("log_level", "0");
-        producer = new ProducerBuilder<Null, byte[]>(producerConfig).Build();
+        _producer = new ProducerBuilder<Null, byte[]>(producerConfig).Build();
     }
 
     public string Topic { get; }
@@ -56,16 +56,16 @@ public sealed class KafkaScenario : IDisposable
     public string Group { get; }
 
     public Task CreateTopics() =>
-        admin.CreateTopicsAsync(
+        _admin.CreateTopicsAsync(
             [new TopicSpecification { Name = Topic, NumPartitions = 1, ReplicationFactor = 1 }],
             new CreateTopicsOptions { RequestTimeout = TimeSpan.FromSeconds(30) });
 
-    public async Task<PublishedRecord> Publish(string payload, CancellationToken cancellationToken = default)
+    private async Task<PublishedRecord> Publish(string payload, CancellationToken cancellationToken = default)
     {
         var bytes = Encoding.UTF8.GetBytes(payload);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
-        var delivered = await producer.ProduceAsync(
+        var delivered = await _producer.ProduceAsync(
             new TopicPartition(Topic, 0),
             new Message<Null, byte[]> { Value = bytes },
             timeout.Token);
@@ -79,16 +79,16 @@ public sealed class KafkaScenario : IDisposable
 
     public async Task<long> CommittedOffset()
     {
-        var result = await admin.ListConsumerGroupOffsetsAsync(
+        var result = await _admin.ListConsumerGroupOffsetsAsync(
             [new ConsumerGroupTopicPartitions(Group, [new TopicPartition(Topic, 0)])],
             new ListConsumerGroupOffsetsOptions { RequestTimeout = TimeSpan.FromSeconds(5) });
         return result.Single().Partitions.Single().Offset.Value;
     }
 
-    public async Task<long> LogEndOffset()
+    private async Task<long> LogEndOffset()
     {
         var partition = new TopicPartition(Topic, 0);
-        var result = await admin.ListOffsetsAsync(
+        var result = await _admin.ListOffsetsAsync(
             [new TopicPartitionOffsetSpec { TopicPartition = partition, OffsetSpec = OffsetSpec.Latest() }],
             new ListOffsetsOptions { RequestTimeout = TimeSpan.FromSeconds(5) });
         var offset = result.ResultInfos.Single().TopicPartitionOffsetError;
@@ -165,8 +165,8 @@ public sealed class KafkaScenario : IDisposable
 
     public void Dispose()
     {
-        producer.Dispose();
-        admin.Dispose();
+        _producer.Dispose();
+        _admin.Dispose();
     }
 
     private static bool Matches(

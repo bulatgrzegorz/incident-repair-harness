@@ -13,7 +13,7 @@ public static partial class Agent
     public static async Task Prepare(string root, string agent, CancellationToken cancellationToken = default)
     {
         var timer = Stopwatch.StartNew();
-        var runtime = await IncidentHarness.ContainerRuntime.Detect(cancellationToken);
+        var runtime = await ContainerRuntime.Detect(cancellationToken);
         ConsoleUi.PreparationHeader(agent, runtime.Executable);
         await ConsoleUi.Status(
             $"Building {AgentImage}",
@@ -46,7 +46,7 @@ public static partial class Agent
         CancellationToken cancellationToken = default)
     {
         ValidateProviderAccess(model, credentialEnvironment);
-        var prompt = File.ReadAllText(Path.Combine(root, "agent/repair-prompt.md"));
+        var prompt = await File.ReadAllTextAsync(Path.Combine(root, "agent/repair-prompt.md"), cancellationToken);
         var state = Path.Combine(artifacts, "opencode-state");
         Directory.CreateDirectory(submission);
         Directory.CreateDirectory(state);
@@ -87,7 +87,7 @@ public static partial class Agent
         var session = Artifacts.ReadJson(Path.Combine(artifacts, "session.json"))["session_id"]?.GetValue<string>()
             ?? throw new JsonException("Missing OpenCode session ID");
         var state = Path.Combine(artifacts, "opencode-state");
-        var prompt = File.ReadAllText(Path.Combine(root, "agent/post-mortem-prompt.md"));
+        var prompt = await File.ReadAllTextAsync(Path.Combine(root, "agent/post-mortem-prompt.md"), cancellationToken);
         await RunRestrictedOpenCode(
             root, candidate, evidence, submission, artifacts, state, model, credentialEnvironment,
             prompt, "post-mortem", session, cancellationToken);
@@ -98,7 +98,7 @@ public static partial class Agent
         Directory.Delete(state, recursive: true);
     }
 
-    public static void ValidateSubmission(string submission)
+    internal static void ValidateSubmission(string submission)
     {
         var summaryPath = Path.Combine(submission, "repair-summary.json");
         if (!File.Exists(summaryPath))
@@ -114,7 +114,7 @@ public static partial class Agent
         }
     }
 
-    public static void ValidatePostMortem(string path)
+    internal static void ValidatePostMortem(string path)
     {
         if (!File.Exists(path))
         {
@@ -144,7 +144,7 @@ public static partial class Agent
         string? session,
         CancellationToken cancellationToken)
     {
-        var runtime = await IncidentHarness.ContainerRuntime.Detect(cancellationToken);
+        var runtime = await ContainerRuntime.Detect(cancellationToken);
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var network = $"incident-agent-{suffix}";
         var proxy = $"incident-proxy-{suffix}";
@@ -300,6 +300,7 @@ public static partial class Agent
         }
         catch
         {
+            // ignored
         }
     }
 

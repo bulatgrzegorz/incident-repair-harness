@@ -50,7 +50,7 @@ public static class ProcessRunner
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
             process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync();
+            await process.WaitForExitAsync(CancellationToken.None);
             await Task.WhenAll(stdout, stderr);
             cancellationToken.ThrowIfCancellationRequested();
             throw new TimeoutException($"{executable} timed out after {timeout.TotalSeconds:0} seconds");
@@ -59,7 +59,7 @@ public static class ProcessRunner
         var result = new CommandResult(process.ExitCode, await stdout, await stderr);
         if (logPath is not null)
         {
-            await File.AppendAllTextAsync(logPath, result.StandardOutput + result.StandardError);
+            await File.AppendAllTextAsync(logPath, result.StandardOutput + result.StandardError, cancellation.Token);
         }
         if (check && result.ExitCode != 0)
         {
@@ -91,11 +91,10 @@ public static class ProcessRunner
         while ((read = await reader.ReadAsync(buffer)) > 0)
         {
             result.Append(buffer, 0, read);
-            if (result.Length > limit)
-            {
-                result.Remove(0, result.Length - limit);
-                truncated = true;
-            }
+            if (result.Length <= limit) continue;
+            
+            result.Remove(0, result.Length - limit);
+            truncated = true;
         }
         return truncated ? "[earlier output truncated]\n" + result : result.ToString();
     }
@@ -150,21 +149,21 @@ public static class ProcessRunner
 
 public sealed class WorkerProcess : IAsyncDisposable
 {
-    private readonly Process process;
-    private readonly FileStream stdout;
-    private readonly FileStream stderr;
-    private readonly Task stdoutCopy;
-    private readonly Task stderrCopy;
+    private readonly Process _process;
+    private readonly FileStream _stdout;
+    private readonly FileStream _stderr;
+    private readonly Task _stdoutCopy;
+    private readonly Task _stderrCopy;
 
-    public bool HasExited => process.HasExited;
+    public bool HasExited => _process.HasExited;
 
     private WorkerProcess(Process process, FileStream stdout, FileStream stderr)
     {
-        this.process = process;
-        this.stdout = stdout;
-        this.stderr = stderr;
-        stdoutCopy = process.StandardOutput.BaseStream.CopyToAsync(stdout);
-        stderrCopy = process.StandardError.BaseStream.CopyToAsync(stderr);
+        _process = process;
+        _stdout = stdout;
+        _stderr = stderr;
+        _stdoutCopy = process.StandardOutput.BaseStream.CopyToAsync(stdout);
+        _stderrCopy = process.StandardError.BaseStream.CopyToAsync(stderr);
     }
 
     public static WorkerProcess Start(string workerDll, IReadOnlyDictionary<string, string> environment, string stdoutPath, string stderrPath)
@@ -210,38 +209,38 @@ public sealed class WorkerProcess : IAsyncDisposable
     {
         try
         {
-            if (!process.HasExited)
+            if (!_process.HasExited)
             {
                 try
                 {
-                    UnixHost.Interrupt(process.Id);
+                    UnixHost.Interrupt(_process.Id);
                 }
-                catch (InvalidOperationException) when (process.HasExited)
+                catch (InvalidOperationException) when (_process.HasExited)
                 {
                 }
                 using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 try
                 {
-                    await process.WaitForExitAsync(cancellation.Token);
+                    await _process.WaitForExitAsync(cancellation.Token);
                 }
                 catch (OperationCanceledException)
                 {
-                    process.Kill(entireProcessTree: true);
-                    await process.WaitForExitAsync();
+                    _process.Kill(entireProcessTree: true);
+                    await _process.WaitForExitAsync(CancellationToken.None);
                 }
             }
-            await Task.WhenAll(stdoutCopy, stderrCopy);
+            await Task.WhenAll(_stdoutCopy, _stderrCopy);
         }
         finally
         {
-            if (!process.HasExited)
+            if (!_process.HasExited)
             {
-                process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync();
+                _process.Kill(entireProcessTree: true);
+                await _process.WaitForExitAsync();
             }
-            await stdout.DisposeAsync();
-            await stderr.DisposeAsync();
-            process.Dispose();
+            await _stdout.DisposeAsync();
+            await _stderr.DisposeAsync();
+            _process.Dispose();
         }
     }
 }

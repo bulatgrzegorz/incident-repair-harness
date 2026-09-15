@@ -38,6 +38,8 @@ public static class CandidateWorkspace
             var evidence = Path.Combine(runDirectory, "agent-evidence");
             Directory.CreateDirectory(evidence);
             File.Copy(Path.Combine(runDirectory, "telemetry/alert.json"), Path.Combine(evidence, "alert.json"));
+            File.Copy(Path.Combine(runDirectory, "worker.stderr.log"), Path.Combine(evidence, "worker-errors.log"));
+            File.Copy(Path.Combine(runDirectory, "incident-inputs.json"), Path.Combine(evidence, "kafka-records.json"));
             var agentArtifacts = Path.Combine(runDirectory, "agent");
             Directory.CreateDirectory(agentArtifacts);
             await Agent.RunOpenCode(

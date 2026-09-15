@@ -1,6 +1,6 @@
 # Repair Task
 
-A Grafana alert fired for the product worker. The alert payload is available at `evidence/alert.json`.
+A Grafana alert fired for the product worker. Start with the alert in `evidence/alert.json`, the structured failure log in `evidence/worker-errors.log`, and the captured Kafka records in `evidence/kafka-records.json`.
 
 Investigate the alert and repair the application. Search the implementation under `src/ProductWorker/` and the functional tests under `tests/ProductWorker.Tests/`.
 
