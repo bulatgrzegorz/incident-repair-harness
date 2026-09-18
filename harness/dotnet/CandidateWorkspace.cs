@@ -232,17 +232,27 @@ public static class CandidateWorkspace
         return new CommandResult(exitCode, "", "");
     }
 
-    private static Task<CommandResult> RunFunctionalTests(
+    private static async Task<CommandResult> RunFunctionalTests(
         ContainerRuntime runtime,
         string directory,
         string network,
         bool check,
         string output,
-        CancellationToken cancellationToken) =>
-        ContainerDotnet(
+        CancellationToken cancellationToken)
+    {
+        const string project = "tests/ProductWorker.Tests/ProductWorker.Tests.csproj";
+        await ContainerDotnet(
             runtime,
             directory,
-            ["run", "--project", "tests/ProductWorker.Tests/ProductWorker.Tests.csproj", "--configuration", "Release", "--property:RestoreLockedMode=true"],
+            ["restore", project, "--locked-mode"],
+            true,
+            output,
+            cancellationToken,
+            network);
+        return await ContainerDotnet(
+            runtime,
+            directory,
+            ["run", "--project", project, "--configuration", "Release", "--no-restore"],
             check,
             output,
             cancellationToken,
@@ -252,6 +262,7 @@ public static class CandidateWorkspace
                 "FUNCTIONAL_TESTS_KAFKA_ENDPOINT=broker:19092",
                 "FUNCTIONAL_TESTS_OTLP_ENDPOINT=http://lgtm:4318",
             ]);
+    }
 
     private static Task<CommandResult> RunPolicyCheck(
         ContainerRuntime runtime,

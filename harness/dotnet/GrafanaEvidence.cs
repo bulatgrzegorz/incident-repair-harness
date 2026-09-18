@@ -9,10 +9,10 @@ namespace IncidentHarness;
 
 public static class GrafanaEvidence
 {
-    internal const string AlertName = "Product worker processing failures with consumer lag";
+    private const string AlertName = "Product worker processing failures with consumer lag";
 
-    internal static JsonNode? FindAlert(JsonArray alerts) => alerts.FirstOrDefault(item =>
-        item?["labels"]?["alertname"]?.GetValue<string>() == AlertName);
+    private static JsonNode? FindAlert(JsonArray alerts) => 
+        alerts.FirstOrDefault(item => item?["labels"]?["alertname"]?.GetValue<string>() == AlertName);
 
     public static async Task<JsonNode> WaitForAlert(
         string outputDirectory,
@@ -24,7 +24,8 @@ public static class GrafanaEvidence
         var deadline = Stopwatch.GetTimestamp() + (long)(limit.TotalSeconds * Stopwatch.Frequency);
         JsonNode? latest = null;
         var observations = Path.Combine(outputDirectory, "alert-observations.jsonl");
-        using var handler = new HttpClientHandler { UseProxy = false };
+        using var handler = new HttpClientHandler();
+        handler.UseProxy = false;
         using var client = new HttpClient(handler);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes("admin:admin")));

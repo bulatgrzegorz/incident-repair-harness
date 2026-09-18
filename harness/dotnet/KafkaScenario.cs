@@ -51,9 +51,9 @@ public sealed class KafkaScenario : IDisposable
         _producer = new ProducerBuilder<Null, byte[]>(producerConfig).Build();
     }
 
-    public string Topic { get; }
+    private string Topic { get; }
 
-    public string Group { get; }
+    private string Group { get; }
 
     public Task CreateTopics() =>
         _admin.CreateTopicsAsync(
@@ -105,14 +105,35 @@ public sealed class KafkaScenario : IDisposable
         string failureLog,
         CancellationToken cancellationToken)
     {
-        var baseline = await Publish("{\"productId\":\"P-baseline\",\"productType\":\"Physical\",\"price\":100}", cancellationToken);
+        var baseline = await Publish("""
+                                     {
+                                        "productId": "P-baseline",
+                                        "productType": "Physical",
+                                        "price": 100
+                                     }
+                                     """, cancellationToken);
+                                    
         await Wait(
             "baseline processing and commit",
             async () => File.Exists(ledgerPath) && LedgerDocument.Read(ledgerPath).Records.Count == 1 &&
                         await CommittedOffset() == baseline.Offset + 1,
             cancellationToken: cancellationToken);
-        var poison = await Publish("{\"productId\":\"P-poison\",\"productType\":null,\"price\":100}", cancellationToken);
-        var tail = await Publish("{\"productId\":\"P-tail\",\"productType\":\"Digital\",\"price\":50}", cancellationToken);
+        
+        var poison = await Publish("""
+                                   {
+                                      "productId": "P-poison",
+                                      "productType": null,
+                                      "price": 100
+                                   }
+                                   """, cancellationToken);
+        var tail = await Publish("""
+                                   {
+                                      "productId": "P-tail",
+                                      "productType": "Digital",
+                                      "price": 50
+                                   }
+                                   """, cancellationToken);
+        
         Artifacts.Phase(runDirectory, "injected");
         await Wait(
             "three poison retries",

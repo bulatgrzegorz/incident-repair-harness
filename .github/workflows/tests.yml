@@ -1,0 +1,28 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - run: dotnet run --project tests/IncidentHarness.Tests/IncidentHarness.Tests.csproj
+      - run: dotnet run --project tests/ProductWorker.Smoke/ProductWorker.Smoke.csproj
+      - run: dotnet restore tests/ProductWorker.Tests/ProductWorker.Tests.csproj --locked-mode
+      - run: >-
+          dotnet run --project tests/ProductWorker.Tests/ProductWorker.Tests.csproj
+          --configuration Release --no-restore --
+          --report-trx
+          --report-trx-filename tests.trx
+          --results-directory TestResults
