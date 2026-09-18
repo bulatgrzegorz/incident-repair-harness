@@ -25,7 +25,7 @@ services:
   aspire:
     image: mcr.microsoft.com/dotnet/aspire-dashboard:13.5.2@sha256:edc005dad8b5426cc06bbde219fc26acaefdd4eb81ea3cf1b5f5209d52e9ac07
     environment:
-      DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
+      ASPIRE_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
 networks:
   default:
     internal: true

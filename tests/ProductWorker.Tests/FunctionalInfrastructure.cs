@@ -30,7 +30,7 @@ public sealed class FunctionalInfrastructure : IAsyncInitializer, IAsyncDisposab
         {
             _kafka = new KafkaBuilder(KafkaImage).Build();
             _aspire = new ContainerBuilder(AspireImage)
-                .WithEnvironment("DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS", "true")
+                .WithEnvironment("ASPIRE_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS", "true")
                 .WithPortBinding(18888, true)
                 .WithPortBinding(18889, true)
                 .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(request => request.ForPort(18888)))
