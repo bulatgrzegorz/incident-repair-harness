@@ -9,9 +9,9 @@ namespace IncidentHarness;
 
 public static class GrafanaEvidence
 {
-    private const string AlertName = "Product worker processing failures with consumer lag";
+    internal const string AlertName = "Product worker processing failures with consumer lag";
 
-    private static JsonNode? FindAlert(JsonArray alerts) => 
+    internal static JsonNode? FindAlert(JsonArray alerts) =>
         alerts.FirstOrDefault(item => item?["labels"]?["alertname"]?.GetValue<string>() == AlertName);
 
     public static async Task<JsonNode> WaitForAlert(
