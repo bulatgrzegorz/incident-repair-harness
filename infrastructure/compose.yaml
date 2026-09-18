@@ -1,6 +1,6 @@
 services:
   broker:
-    image: docker.io/apache/kafka:4.0.0@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75
+    image: docker.io/apache/kafka:4.0.0
     ports:
       - "127.0.0.1:9092:9092"
     environment:
@@ -28,7 +28,7 @@ services:
       - default
       - application
   lgtm:
-    image: docker.io/grafana/otel-lgtm:0.11.10@sha256:09d8c3ce4f3a5f2f5b1ef7a3cc526a7e03b608aeef3ea1c67c912df43b2690c9
+    image: docker.io/grafana/otel-lgtm:0.11.10
     ports:
       - "127.0.0.1:3000:3000"
       - "127.0.0.1:4318:4318"

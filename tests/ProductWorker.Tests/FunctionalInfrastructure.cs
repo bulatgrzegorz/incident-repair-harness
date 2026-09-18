@@ -10,8 +10,8 @@ namespace ProductWorker.Tests;
 
 public sealed class FunctionalInfrastructure : IAsyncInitializer, IAsyncDisposable
 {
-    private const string KafkaImage = "docker.io/apache/kafka:4.0.0@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75";
-    private const string AspireImage = "mcr.microsoft.com/dotnet/aspire-dashboard:13.5.2@sha256:0ef531119b8073aed12b0db2b4e4ab02866c6c69b7a52264269abd00cfb48a34";
+    private const string KafkaImage = "docker.io/apache/kafka:4.0.0";
+    private const string AspireImage = "mcr.microsoft.com/dotnet/aspire-dashboard:13.5.2";
     private KafkaContainer? _kafka;
     private IContainer? _aspire;
     private TracerProvider? _tracing;
