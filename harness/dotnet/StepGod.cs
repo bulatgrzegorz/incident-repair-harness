@@ -212,12 +212,56 @@ public sealed class ConfigurationStep : IStep
     }
 }
 
-public sealed class InfrastructureStepOutput
+public sealed class InfrastructureStepOutput(
+    KafkaScenario kafka,
+    string workerDll,
+    Dictionary<string, string> environment,
+    string stdoutLog,
+    string stderrLog) : IAsyncDisposable
 {
-    public KafkaScenario? Kafka { get; set; }
-    public WorkerProcess? Worker { get; set; }
-    public required string WorkerDll { get; init; }
-    public required Dictionary<string, string> Environment { get; init; }
+    private WorkerProcess? _worker;
+
+    public KafkaScenario Kafka { get; } = kafka;
+    public bool WorkerHasExited => _worker?.HasExited ?? true;
+
+    public void StartWorker()
+    {
+        if (_worker is not null)
+        {
+            throw new InvalidOperationException("Worker is already running");
+        }
+        _worker = WorkerProcess.Start(workerDll, environment, stdoutLog, stderrLog);
+    }
+
+    public async Task RestartWorkerAsync()
+    {
+        await StopWorkerAsync();
+        environment["SERVICE_INSTANCE_ID"] = $"broken-{Guid.NewGuid():N}";
+        StartWorker();
+    }
+
+    public async Task StopWorkerAsync()
+    {
+        if (_worker is null)
+        {
+            return;
+        }
+        var worker = _worker;
+        _worker = null;
+        await worker.DisposeAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await StopWorkerAsync();
+        }
+        finally
+        {
+            Kafka.Dispose();
+        }
+    }
 }
 
 public sealed class InfrastructureStep : IStep
@@ -234,39 +278,29 @@ public sealed class InfrastructureStep : IStep
         _configuration = configuration;
         _keep = context.ExperimentOptions.Keep;
         
-        var output = new InfrastructureStepOutput
-        {
-            WorkerDll = await BuildBrokenWorker(configuration.Root, configuration.CommandLogPath, cancellationToken),
-            Environment = CreateWorkerEnvironment(configuration),
-        };
-        
+        var workerDll = await BuildBrokenWorker(configuration.Root, configuration.CommandLogPath, cancellationToken);
         await configuration.Runtime.StartInfrastructure(configuration.Root, configuration.Project, configuration.CommandLogPath, cancellationToken);
         
         Artifacts.Phase(configuration.RunDirectory, "baseline");
         
-        output.Kafka = new KafkaScenario(configuration.Topic, configuration.Group);
-        await output.Kafka.CreateTopics();
-        
-        output.Worker = WorkerProcess.Start(output.WorkerDll, output.Environment, configuration.StdoutLog, configuration.StderrLog);
-        
+        var kafka = new KafkaScenario(configuration.Topic, configuration.Group);
+        var output = new InfrastructureStepOutput(
+            kafka,
+            workerDll,
+            CreateWorkerEnvironment(configuration),
+            configuration.StdoutLog,
+            configuration.StderrLog);
         _output = output;
+        await kafka.CreateTopics();
+        output.StartWorker();
         context.Set(output);
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_output?.Worker is not null)
+        if (_output is not null)
         {
-            await BestEffort(async () => await _output.Worker.DisposeAsync());
-        }
-        
-        if (_output?.Kafka is not null)
-        {
-            await BestEffort(() =>
-            {
-                _output.Kafka.Dispose();
-                return Task.CompletedTask;
-            });
+            await BestEffort(async () => await _output.DisposeAsync());
         }
         
         if (!_keep && _configuration is not null)
@@ -324,7 +358,7 @@ public sealed class ExperimentSetupStep : IStep
     public async Task ExecuteAsync(ExecutionContext context, CancellationToken cancellationToken)
     {
         var configuration = context.Get<ConfigurationStepOutput>();
-        var kafka = context.Get<InfrastructureStepOutput>().Kafka!;
+        var kafka = context.Get<InfrastructureStepOutput>().Kafka;
         
         var ledgerPath = Path.Combine(configuration.OutputDirectory, "processed-products.json");
         
@@ -350,22 +384,17 @@ public sealed class InitialExperimentConfirmationStep : IStep
         
         var attemptsBeforeRestart = CountFailures(configuration.StderrLog);
         
-        await infrastructure.Worker!.DisposeAsync();
-        
-        infrastructure.Worker = null;
-        infrastructure.Environment["SERVICE_INSTANCE_ID"] = $"broken-{Guid.NewGuid():N}";
-        infrastructure.Worker = WorkerProcess.Start(
-            infrastructure.WorkerDll, infrastructure.Environment, configuration.StdoutLog, configuration.StderrLog);
+        await infrastructure.RestartWorkerAsync();
 
         await Wait(
             "a retry after worker restart",
-            () => Task.FromResult(!infrastructure.Worker.HasExited && CountFailures(configuration.StderrLog) > attemptsBeforeRestart),
+            () => Task.FromResult(!infrastructure.WorkerHasExited && CountFailures(configuration.StderrLog) > attemptsBeforeRestart),
             TimeSpan.FromSeconds(15),
             cancellationToken);
         var alert = await GrafanaEvidence.WaitForAlert(
             Path.Combine(configuration.RunDirectory, "telemetry"), cancellationToken: cancellationToken);
         Artifacts.Phase(configuration.RunDirectory, "detected");
-        var committed = await infrastructure.Kafka!.CommittedOffset();
+        var committed = await infrastructure.Kafka.CommittedOffset();
         if (committed != incident.Poison.Offset || LedgerDocument.Read(incident.LedgerPath).Records.Count != 1)
         {
             throw new InvalidOperationException("Restart changed the blocked offset or durable output");
@@ -430,8 +459,7 @@ public sealed class FixStep : IStep
         }
         
         var infrastructure = context.Get<InfrastructureStepOutput>();
-        await infrastructure.Worker!.DisposeAsync();
-        infrastructure.Worker = null;
+        await infrastructure.StopWorkerAsync();
         
         Artifacts.Phase(configuration.RunDirectory, "repairing");
         
@@ -482,7 +510,6 @@ public sealed class RedeployStep : IStep
     public async Task ExecuteAsync(ExecutionContext context, CancellationToken cancellationToken)
     {
         var configuration = context.Get<ConfigurationStepOutput>();
-        var infrastructure = context.Get<InfrastructureStepOutput>();
         var fix = context.Get<FixStepOutput>();
         
         var container = $"incident-candidate-{configuration.Suffix}";
@@ -490,8 +517,7 @@ public sealed class RedeployStep : IStep
         _runtime = configuration.Runtime;
         _container = container;
         
-        infrastructure.Environment["SERVICE_INSTANCE_ID"] = $"candidate-{Guid.NewGuid():N}";
-        
+        var serviceInstanceId = $"candidate-{Guid.NewGuid():N}";
         await configuration.Runtime.RunIncidentCandidate(
             container,
             configuration.Project,
@@ -500,7 +526,7 @@ public sealed class RedeployStep : IStep
             configuration.Topic,
             configuration.Group,
             configuration.RunId,
-            infrastructure.Environment["SERVICE_INSTANCE_ID"],
+            serviceInstanceId,
             configuration.CommandLogPath,
             cancellationToken);
         
@@ -530,7 +556,7 @@ public sealed class VerificationStep : IStep
         var incident = context.Get<ExperimentSetupOutput>();
         var redeploy = context.Get<RedeployStepOutput>();
         
-        var (probe, checks) = await infrastructure.Kafka!.VerifyRecovery(
+        var (probe, checks) = await infrastructure.Kafka.VerifyRecovery(
             incident.LedgerPath, incident.Baseline, incident.Poison, incident.Tail, cancellationToken);
         
         Artifacts.Phase(configuration.RunDirectory, "verified");
