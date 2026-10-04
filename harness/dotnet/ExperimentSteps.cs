@@ -1,151 +1,4 @@
-using System.Diagnostics;
-using System.Text.Json.Nodes;
-
 namespace IncidentHarness;
-
-public sealed class ExecutionContext(ExperimentOptions experimentOptions)
-{
-    public ExperimentOptions ExperimentOptions { get; } = experimentOptions;
-    public ConfigurationStepOutput? ConfigurationStepOutput { get; private set; }
-    public InfrastructureStepOutput? InfrastructureStepOutput { get; private set; }
-    public ExperimentSetupOutput? ExperimentSetupOutput { get; private set; }
-    public InitialExperimentConfirmationOutput? InitialExperimentConfirmationOutput { get; private set; }
-    public FixStepOutput? FixStepOutput { get; private set; }
-    public RedeployStepOutput? RedeployStepOutput { get; private set; }
-    public VerificationStepOutput? VerificationStepOutput { get; private set; }
-    public PostMortemStepOutput? PostMortemStepOutput { get; private set; }
-
-    public void Set<T>(T value)
-    {
-        var property = GetType().GetProperties().SingleOrDefault(p => p.CanWrite && p.PropertyType == typeof(T));
-        if (property is null)
-        {
-            throw new InvalidOperationException($"No writable property for {typeof(T).Name}");
-        }
-        property.SetValue(this, value);
-    }
-
-    public T Get<T>()
-    {
-        var property = GetType().GetProperties().SingleOrDefault(p => p.PropertyType == typeof(T));
-        return property?.GetValue(this) is not T value ? 
-            throw new InvalidOperationException($"No value for {typeof(T).Name}") : 
-            value;
-    }
-    
-    public T? TryGet<T>() where T : class =>
-        GetType().GetProperties().SingleOrDefault(p => p.PropertyType == typeof(T))?.GetValue(this) as T;
-}
-
-public interface IStep : IAsyncDisposable
-{
-    string Name { get; }
-    Task ExecuteAsync(ExecutionContext context, CancellationToken cancellationToken);
-    ValueTask IAsyncDisposable.DisposeAsync() => ValueTask.CompletedTask;
-}
-
-public sealed class StepExecutionService
-{
-    public async Task<int> Execute(ExperimentOptions experimentOptions, CancellationToken cancellationToken)
-    {
-        var context = new ExecutionContext(experimentOptions);
-        var runTimer = Stopwatch.StartNew();
-        var steps = CreateSteps(experimentOptions.Agent);
-
-        try
-        {
-            var stepTimer = Stopwatch.StartNew();
-            var currentStep = 0;
-
-            foreach (var step in steps)
-            {
-                ConsoleUi.Step(++currentStep, steps.Length, step.Name);
-                stepTimer.Restart();
-                
-                await step.ExecuteAsync(context, cancellationToken);
-
-                ConsoleUi.StepDone(stepTimer.Elapsed);
-            }
-
-            var configuration = context.Get<ConfigurationStepOutput>();
-            if (experimentOptions.Agent is null)
-            {
-                var incident = context.Get<ExperimentSetupOutput>();
-                ConsoleUi.Success("INCIDENT REPRODUCED", $"Consumer remains blocked at offset {incident.Poison.Offset}.", configuration.RunDirectory);
-                return 0;
-            }
-
-            Artifacts.FinalizeSuccess(configuration.RunDirectory, experimentOptions.Agent);
-            ConsoleUi.Success(
-                "INCIDENT RESOLVED",
-                $"Poison rejected | tail processed | partition drained | {runTimer.Elapsed.TotalSeconds:F1}s",
-                configuration.RunDirectory);
-            return 0;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            ConsoleUi.Error($"RUN CANCELLED{ArtifactLocation(context)}");
-            return 130;
-        }
-        catch (Exception exception)
-        {
-            ConsoleUi.Error($"RUN FAILED  {exception.Message}");
-            var location = ArtifactLocation(context);
-            if (location.Length > 0)
-            {
-                ConsoleUi.Error(location.TrimStart());
-            }
-            return 1;
-        }
-        finally
-        {
-            foreach (var step in steps.Reverse())
-            {
-                await BestEffort(async () => await step.DisposeAsync());
-            }
-        }
-    }
-
-    private static IStep[] CreateSteps(string? agent)
-    {
-        List<IStep> steps =
-        [
-            new ConfigurationStep(),
-            new InfrastructureStep(),
-            new ExperimentSetupStep(),
-            new InitialExperimentConfirmationStep(),
-        ];
-        
-        if (agent is not null)
-        {
-            steps.AddRange([new FixStep(), new RedeployStep(), new VerificationStep()]);
-        }
-        
-        if (agent == "opencode")
-        {
-            steps.Add(new PostMortemStep());
-        }
-        
-        return [.. steps];
-    }
-
-    private static string ArtifactLocation(ExecutionContext context) =>
-        context.TryGet<ConfigurationStepOutput>() is { } configuration
-            ? $"  Artifacts: {configuration.RunDirectory}"
-            : "";
-
-    private static async Task BestEffort(Func<Task> action)
-    {
-        try
-        {
-            await action();
-        }
-        catch
-        {
-            // ignored
-        }
-    }
-}
 
 public sealed record ConfigurationStepOutput(
     ContainerRuntime Runtime,
@@ -165,13 +18,13 @@ public sealed class ConfigurationStep : IStep
 {
     public string Name => "Preparing experiment configuration";
 
-    public async Task ExecuteAsync(ExecutionContext context, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(ExperimentContext context, CancellationToken cancellationToken)
     {
         var (root, _, agent, model, _) = context.ExperimentOptions;
         UnixHost.EnsureSupported();
-        
+
         var runtime = await ContainerRuntime.Detect(cancellationToken);
-        
+
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var runId = $"{DateTimeOffset.UtcNow:yyyyMMdd'T'HHmmss'Z'}-{suffix}";
         var project = $"incident-repair-{suffix}";
@@ -179,7 +32,7 @@ public sealed class ConfigurationStep : IStep
         var group = $"product-worker-{suffix}";
         var runDirectory = Path.Combine(root, "runs", runId);
         var outputDirectory = Path.Combine(runDirectory, "output");
-        
+
         Directory.CreateDirectory(outputDirectory);
 
         Artifacts.WriteJson(Path.Combine(runDirectory, "run.json"), new
@@ -194,21 +47,22 @@ public sealed class ConfigurationStep : IStep
             group,
             container_runtime = runtime.Executable,
         });
-        
+
         Artifacts.Phase(runDirectory, "preflight");
         ConsoleUi.Header(runId, agent ?? "smoke", runtime.Executable);
 
         var commandLog = Path.Combine(runDirectory, "commands.log");
         var stdoutLog = Path.Combine(runDirectory, "worker.stdout.log");
         var stderrLog = Path.Combine(runDirectory, "worker.stderr.log");
-        
-        await File.WriteAllTextAsync(commandLog, "", cancellationToken);
-        await File.WriteAllTextAsync(stdoutLog, "", cancellationToken);
-        await File.WriteAllTextAsync(stderrLog, "", cancellationToken);
 
-        context.Set(new ConfigurationStepOutput(
+        foreach (var path in new[] { commandLog, stdoutLog, stderrLog })
+        {
+            await File.WriteAllTextAsync(path, "", cancellationToken);
+        }
+
+        context.Configuration = new ConfigurationStepOutput(
             runtime, suffix, runId, root, project, commandLog, runDirectory, outputDirectory,
-            topic, group, stdoutLog, stderrLog));
+            topic, group, stdoutLog, stderrLog);
     }
 }
 
@@ -272,17 +126,17 @@ public sealed class InfrastructureStep : IStep
 
     public string Name => "Starting Kafka, observability services and worker";
 
-    public async Task ExecuteAsync(ExecutionContext context, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(ExperimentContext context, CancellationToken cancellationToken)
     {
-        var configuration = context.Get<ConfigurationStepOutput>();
+        var configuration = context.Configuration;
         _configuration = configuration;
         _keep = context.ExperimentOptions.Keep;
-        
+
         var workerDll = await BuildBrokenWorker(configuration.Root, configuration.CommandLogPath, cancellationToken);
         await configuration.Runtime.StartInfrastructure(configuration.Root, configuration.Project, configuration.CommandLogPath, cancellationToken);
-        
+
         Artifacts.Phase(configuration.RunDirectory, "baseline");
-        
+
         var kafka = new KafkaScenario(configuration.Topic, configuration.Group);
         var output = new InfrastructureStepOutput(
             kafka,
@@ -293,32 +147,20 @@ public sealed class InfrastructureStep : IStep
         _output = output;
         await kafka.CreateTopics();
         output.StartWorker();
-        context.Set(output);
+        context.Infrastructure = output;
     }
 
     public async ValueTask DisposeAsync()
     {
         if (_output is not null)
         {
-            await BestEffort(async () => await _output.DisposeAsync());
+            await Experiment.BestEffort(async () => await _output.DisposeAsync());
         }
-        
+
         if (!_keep && _configuration is not null)
         {
-            await BestEffort(() => _configuration.Runtime.StopInfrastructure(
+            await Experiment.BestEffort(() => _configuration.Runtime.StopInfrastructure(
                 _configuration.Root, _configuration.Project, _configuration.CommandLogPath));
-        }
-    }
-
-    private static async Task BestEffort(Func<Task> action)
-    {
-        try
-        {
-            await action();
-        }
-        catch
-        {
-            // ignored
         }
     }
 
@@ -355,40 +197,37 @@ public sealed class ExperimentSetupStep : IStep
 {
     public string Name => "Reproducing the blocked-consumer incident";
 
-    public async Task ExecuteAsync(ExecutionContext context, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(ExperimentContext context, CancellationToken cancellationToken)
     {
-        var configuration = context.Get<ConfigurationStepOutput>();
-        var kafka = context.Get<InfrastructureStepOutput>().Kafka;
-        
+        var configuration = context.Configuration;
+        var kafka = context.Infrastructure.Kafka;
+
         var ledgerPath = Path.Combine(configuration.OutputDirectory, "processed-products.json");
-        
-        var (baseline, poison, tail) = 
-            await kafka.InjectIncident(
+
+        var (baseline, poison, tail) = await kafka.InjectIncident(
             configuration.RunDirectory, ledgerPath, configuration.StderrLog, cancellationToken);
-        
-        context.Set(new ExperimentSetupOutput(ledgerPath, baseline, poison, tail));
+
+        context.Incident = new ExperimentSetupOutput(ledgerPath, baseline, poison, tail);
     }
 }
-
-public sealed record InitialExperimentConfirmationOutput(long CommittedOffset, int FailureAttempts, JsonNode Alert);
 
 public sealed class InitialExperimentConfirmationStep : IStep
 {
     public string Name => "Confirming retries, restart persistence, and Grafana alert";
 
-    public async Task ExecuteAsync(ExecutionContext context, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(ExperimentContext context, CancellationToken cancellationToken)
     {
-        var configuration = context.Get<ConfigurationStepOutput>();
-        var infrastructure = context.Get<InfrastructureStepOutput>();
-        var incident = context.Get<ExperimentSetupOutput>();
-        
-        var attemptsBeforeRestart = CountFailures(configuration.StderrLog);
-        
+        var configuration = context.Configuration;
+        var infrastructure = context.Infrastructure;
+        var incident = context.Incident;
+
+        var attemptsBeforeRestart = KafkaScenario.CountFailures(configuration.StderrLog);
+
         await infrastructure.RestartWorkerAsync();
 
-        await Wait(
+        await KafkaScenario.Wait(
             "a retry after worker restart",
-            () => Task.FromResult(!infrastructure.WorkerHasExited && CountFailures(configuration.StderrLog) > attemptsBeforeRestart),
+            () => Task.FromResult(!infrastructure.WorkerHasExited && KafkaScenario.CountFailures(configuration.StderrLog) > attemptsBeforeRestart),
             TimeSpan.FromSeconds(15),
             cancellationToken);
         var alert = await GrafanaEvidence.WaitForAlert(
@@ -402,7 +241,7 @@ public sealed class InitialExperimentConfirmationStep : IStep
 
         Artifacts.WriteJson(Path.Combine(configuration.RunDirectory, "incident-inputs.json"),
             new[] { incident.Baseline, incident.Poison, incident.Tail });
-        var attempts = CountFailures(configuration.StderrLog);
+        var attempts = KafkaScenario.CountFailures(configuration.StderrLog);
         Artifacts.WriteJson(Path.Combine(configuration.RunDirectory, "incident.json"), new
         {
             schema_version = 1,
@@ -416,27 +255,6 @@ public sealed class InitialExperimentConfirmationStep : IStep
             grafana_alert = alert,
         });
         ConsoleUi.Insight("Incident confirmed", $"offset {incident.Poison.Offset} blocked after {attempts} retries and a worker restart");
-        context.Set(new InitialExperimentConfirmationOutput(committed, attempts, alert));
-    }
-
-    private static int CountFailures(string path) => File.ReadAllText(path).Split("product.processing.failed").Length - 1;
-
-    private static async Task Wait(
-        string description,
-        Func<Task<bool>> condition,
-        TimeSpan timeout,
-        CancellationToken cancellationToken)
-    {
-        var timer = Stopwatch.StartNew();
-        while (timer.Elapsed < timeout)
-        {
-            if (await condition())
-            {
-                return;
-            }
-            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
-        }
-        throw new TimeoutException($"Timed out waiting for {description}");
     }
 }
 
@@ -448,21 +266,21 @@ public sealed class FixStep : IStep
 
     public string Name => "Preparing and testing the repair";
 
-    public async Task ExecuteAsync(ExecutionContext context, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(ExperimentContext context, CancellationToken cancellationToken)
     {
         var options = context.ExperimentOptions;
-        var configuration = context.Get<ConfigurationStepOutput>();
-        
+        var configuration = context.Configuration;
+
         if (options.Agent == "opencode")
         {
             _opencodeState = Path.Combine(configuration.RunDirectory, "agent", "opencode-state");
         }
-        
-        var infrastructure = context.Get<InfrastructureStepOutput>();
+
+        var infrastructure = context.Infrastructure;
         await infrastructure.StopWorkerAsync();
-        
+
         Artifacts.Phase(configuration.RunDirectory, "repairing");
-        
+
         var candidate = await CandidateWorkspace.Prepare(
             configuration.Root,
             configuration.RunDirectory,
@@ -471,9 +289,9 @@ public sealed class FixStep : IStep
             options.CredentialEnvironment,
             configuration.CommandLogPath,
             cancellationToken);
-        
+
         Artifacts.Phase(configuration.RunDirectory, "frozen");
-        
+
         var runtimeCandidate = await CandidateWorkspace.Test(
             configuration.Runtime,
             configuration.Root,
@@ -481,11 +299,11 @@ public sealed class FixStep : IStep
             configuration.RunDirectory,
             $"{configuration.Project}_application",
             cancellationToken);
-        
+
         Artifacts.Phase(configuration.RunDirectory, "tested");
         ConsoleUi.Insight("Repair accepted", "functional regression went red to green; 4 malformed-input policies passed");
-        
-        context.Set(new FixStepOutput(candidate, runtimeCandidate));
+
+        context.Fix = new FixStepOutput(candidate, runtimeCandidate);
     }
 
     public ValueTask DisposeAsync()
@@ -507,16 +325,16 @@ public sealed class RedeployStep : IStep
 
     public string Name => "Replacing the worker";
 
-    public async Task ExecuteAsync(ExecutionContext context, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(ExperimentContext context, CancellationToken cancellationToken)
     {
-        var configuration = context.Get<ConfigurationStepOutput>();
-        var fix = context.Get<FixStepOutput>();
-        
+        var configuration = context.Configuration;
+        var fix = context.Fix;
+
         var container = $"incident-candidate-{configuration.Suffix}";
-        
+
         _runtime = configuration.Runtime;
         _container = container;
-        
+
         var serviceInstanceId = $"candidate-{Guid.NewGuid():N}";
         await configuration.Runtime.RunIncidentCandidate(
             container,
@@ -529,10 +347,10 @@ public sealed class RedeployStep : IStep
             serviceInstanceId,
             configuration.CommandLogPath,
             cancellationToken);
-        
+
         Artifacts.Phase(configuration.RunDirectory, "replaced");
-        
-        context.Set(new RedeployStepOutput(container));
+
+        context.Redeployment = new RedeployStepOutput(container);
     }
 
     public ValueTask DisposeAsync() =>
@@ -541,30 +359,28 @@ public sealed class RedeployStep : IStep
             : ValueTask.CompletedTask;
 }
 
-public sealed record VerificationStepOutput(PublishedRecord Probe, Dictionary<string, bool> Checks);
-
 public sealed class VerificationStep : IStep
 {
     public string Name => "Verifying recovery and finalizing evidence";
 
-    public async Task ExecuteAsync(ExecutionContext context, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(ExperimentContext context, CancellationToken cancellationToken)
     {
         var options = context.ExperimentOptions;
-        
-        var configuration = context.Get<ConfigurationStepOutput>();
-        var infrastructure = context.Get<InfrastructureStepOutput>();
-        var incident = context.Get<ExperimentSetupOutput>();
-        var redeploy = context.Get<RedeployStepOutput>();
-        
+
+        var configuration = context.Configuration;
+        var infrastructure = context.Infrastructure;
+        var incident = context.Incident;
+        var redeploy = context.Redeployment;
+
         var (probe, checks) = await infrastructure.Kafka.VerifyRecovery(
             incident.LedgerPath, incident.Baseline, incident.Poison, incident.Tail, cancellationToken);
-        
+
         Artifacts.Phase(configuration.RunDirectory, "verified");
         ConsoleUi.Insight("Recovery confirmed", $"4 records settled and partition advanced to offset {probe.Offset + 1}");
-        
+
         Artifacts.WriteJson(Path.Combine(configuration.RunDirectory, "verification-inputs.json"),
             new[] { incident.Baseline, incident.Poison, incident.Tail, probe });
-        
+
         Artifacts.WriteJson(Path.Combine(configuration.RunDirectory, "verification.json"), new
         {
             schema_version = 1,
@@ -572,7 +388,7 @@ public sealed class VerificationStep : IStep
             mode = options.Agent,
             checks,
         });
-        
+
         Artifacts.WriteJson(Path.Combine(configuration.RunDirectory, "test-results.json"), new
         {
             schema_version = 1,
@@ -580,26 +396,22 @@ public sealed class VerificationStep : IStep
             candidate = "passed",
             policy_variants = new[] { "missing", "null", "empty", "whitespace" },
         });
-        
+
         await configuration.Runtime.CaptureLogs(
             redeploy.Container, Path.Combine(configuration.RunDirectory, "candidate-worker.log"), cancellationToken);
-        
-        context.Set(new VerificationStepOutput(probe, checks));
     }
 }
-
-public sealed record PostMortemStepOutput;
 
 public sealed class PostMortemStep : IStep
 {
     public string Name => "Generating the post-mortem from verified evidence";
 
-    public async Task ExecuteAsync(ExecutionContext context, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(ExperimentContext context, CancellationToken cancellationToken)
     {
         var options = context.ExperimentOptions;
-        var configuration = context.Get<ConfigurationStepOutput>();
-        var fix = context.Get<FixStepOutput>();
-        
+        var configuration = context.Configuration;
+        var fix = context.Fix;
+
         await Agent.WritePostMortem(
             configuration.Root,
             fix.Candidate,
@@ -607,9 +419,7 @@ public sealed class PostMortemStep : IStep
             options.Model ?? "",
             options.CredentialEnvironment ?? "",
             cancellationToken);
-        
+
         Artifacts.Phase(configuration.RunDirectory, "reported");
-        
-        context.Set(new PostMortemStepOutput());
     }
 }

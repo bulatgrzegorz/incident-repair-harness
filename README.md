@@ -16,7 +16,7 @@
   <a href="#artifacts">Explore the evidence</a>
 </p>
 
-We created it to test incident-repair workflows against a real failure rather than a toy code-editing task. Every run starts from the same intentional defect, preserves the broken Kafka and ledger state during repair, and records enough evidence to explain whether the repair actually restored progress.
+This is a companion repo for a blog post about incident repair. Every run starts from the same intentional defect, preserves the broken Kafka and ledger state during repair, and records enough evidence to explain whether the repair restored progress.
 
 The harness and worker are implemented in C# on .NET 10. Kafka, Grafana LGTM, restricted repair candidates, and the optional coding agent run in containers.
 
@@ -183,6 +183,8 @@ The repair gates are designed to prevent a superficially green result:
 - A random fresh probe is processed.
 - The committed Kafka offset reaches the partition log end.
 
+To follow the code, start with `Experiment.CreateSteps` in `harness/dotnet/Experiment.cs`. Each class in `ExperimentSteps.cs` handles one stage and shares its results through explicit properties on `ExperimentContext`.
+
 ## Commands
 
 Show CLI help:
@@ -245,7 +247,7 @@ dotnet run --project harness/dotnet/IncidentHarness.csproj -- \
 
 `anthropic/<model>` is also allowlisted with an explicitly named credential variable such as `ANTHROPIC_API_KEY`.
 
-The coding container receives only the candidate workspace, captured alert, structured worker failures with stack traces, captured Kafka records, and repair prompt. After independent recovery verification, the same OpenCode session is continued with the candidate mounted read-only and the incident, diff, test, and verification evidence needed to write the post-mortem. Its network is routed through a provider-only Squid proxy. Web tools, search, MCP, and subagents are disabled. The credential value is passed through the named environment variable and is not written into command arguments or run artifacts; transient session state is deleted before finalization.
+The coding container receives only the candidate workspace, captured alert, structured worker failures with stack traces, and repair prompt. After independent recovery verification, the same OpenCode session is continued with the candidate mounted read-only and the incident, diff, test, and verification evidence needed to write the post-mortem. Its network is routed through a provider-only Squid proxy. Web tools, search, MCP, and subagents are disabled. The credential value is passed through the named environment variable and is not written into command arguments or run artifacts; transient session state is deleted before finalization.
 
 OpenCode must change exactly:
 

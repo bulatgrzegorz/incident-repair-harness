@@ -17,26 +17,7 @@ public static class ProcessRunner
         string? logPath = null,
         CancellationToken cancellationToken = default)
     {
-        var startInfo = new ProcessStartInfo(executable)
-        {
-            WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-        if (environment is not null)
-        {
-            foreach (var (name, value) in environment)
-            {
-                startInfo.Environment[name] = value;
-            }
-        }
-
+        var startInfo = CreateStartInfo(executable, arguments, workingDirectory, environment);
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {executable}");
         process.StandardInput.Close();
         var stdout = ReadTail(process.StandardOutput);
@@ -108,19 +89,7 @@ public static class ProcessRunner
         string? workingDirectory = null,
         CancellationToken cancellationToken = default)
     {
-        var startInfo = new ProcessStartInfo(executable)
-        {
-            WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
+        var startInfo = CreateStartInfo(executable, arguments, workingDirectory);
         await using var stdout = new FileStream(stdoutPath, FileMode.Create, FileAccess.Write, FileShare.Read);
         await using var stderr = new FileStream(stderrPath, FileMode.Create, FileAccess.Write, FileShare.Read);
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {executable}");
@@ -145,6 +114,34 @@ public static class ProcessRunner
         await copies;
         return process.ExitCode;
     }
+
+    internal static ProcessStartInfo CreateStartInfo(
+        string executable,
+        IEnumerable<string> arguments,
+        string? workingDirectory = null,
+        IReadOnlyDictionary<string, string>? environment = null)
+    {
+        var startInfo = new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+        if (environment is not null)
+        {
+            foreach (var (name, value) in environment)
+            {
+                startInfo.Environment[name] = value;
+            }
+        }
+        return startInfo;
+    }
 }
 
 public sealed class WorkerProcess : IAsyncDisposable
@@ -168,18 +165,7 @@ public sealed class WorkerProcess : IAsyncDisposable
 
     public static WorkerProcess Start(string workerDll, IReadOnlyDictionary<string, string> environment, string stdoutPath, string stderrPath)
     {
-        var startInfo = new ProcessStartInfo("dotnet")
-        {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(workerDll);
-        foreach (var (name, value) in environment)
-        {
-            startInfo.Environment[name] = value;
-        }
+        var startInfo = ProcessRunner.CreateStartInfo("dotnet", [workerDll], environment: environment);
 
         FileStream? stdout = null;
         FileStream? stderr = null;

@@ -1,10 +1,10 @@
 # Repair Task
 
-A Grafana alert fired for the product worker. Start with the alert in `evidence/alert.json`, the structured failure log in `evidence/worker-errors.log`, and the captured Kafka records in `evidence/kafka-records.json`.
+A Grafana alert fired for the product worker. Start with the alert in `evidence/alert.json` and the structured failure log in `evidence/worker-errors.log`.
 
 Investigate the alert and repair the application. Search the implementation under `src/ProductWorker/` and the functional tests under `tests/ProductWorker.Tests/`.
 
-Add one regression test to `tests/ProductWorker.Tests/ProductProcessingTests.cs`. It must exercise the worker through Kafka and verify externally observable behavior such as durable output and committed offsets; do not call `ProductProcessor` or `OutputLedger` directly. The harness will run the functional test against both the original and repaired implementations. You can compile it with:
+Add regression test. It must exercise the worker through Kafka and verify externally observable behavior such as durable output and committed offsets; do not call `ProductProcessor` or `OutputLedger` directly. The harness will run the functional test against both the original and repaired implementations. You can compile it with:
 
 ```bash
 dotnet build tests/ProductWorker.Tests/ProductWorker.Tests.csproj --configuration Release --property:RestoreLockedMode=true

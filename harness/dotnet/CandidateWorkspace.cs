@@ -34,12 +34,13 @@ public static class CandidateWorkspace
         }
         else
         {
-            var originalFiles = TextFiles(candidate);
+            var originalFiles = Manifest(candidate).ToDictionary(file => file.Path, StringComparer.Ordinal);
+            var originalSources = AllowedChanges.ToDictionary(
+                path => path, path => File.ReadAllText(Path.Combine(candidate, path)), StringComparer.Ordinal);
             var evidence = Path.Combine(runDirectory, "agent-evidence");
             Directory.CreateDirectory(evidence);
             File.Copy(Path.Combine(runDirectory, "telemetry/alert.json"), Path.Combine(evidence, "alert.json"));
             File.Copy(Path.Combine(runDirectory, "worker.stderr.log"), Path.Combine(evidence, "worker-errors.log"));
-            File.Copy(Path.Combine(runDirectory, "incident-inputs.json"), Path.Combine(evidence, "kafka-records.json"));
             var agentArtifacts = Path.Combine(runDirectory, "agent");
             Directory.CreateDirectory(agentArtifacts);
             await Agent.RunOpenCode(
@@ -52,9 +53,8 @@ public static class CandidateWorkspace
                 credentialEnvironment ?? "",
                 cancellationToken);
 
-            Manifest(candidate);
+            var currentFiles = Manifest(candidate).ToDictionary(file => file.Path, StringComparer.Ordinal);
             CleanBuildOutputs(candidate);
-            var currentFiles = TextFiles(candidate);
             var changed = originalFiles.Keys.Union(currentFiles.Keys)
                 .Where(path => originalFiles.GetValueOrDefault(path) != currentFiles.GetValueOrDefault(path))
                 .ToHashSet(StringComparer.Ordinal);
@@ -66,7 +66,7 @@ public static class CandidateWorkspace
             var diff = new List<string>();
             foreach (var path in changed.Order(StringComparer.Ordinal))
             {
-                diff.Add(await UnifiedDiff(path, originalFiles[path], Path.Combine(candidate, path), cancellationToken));
+                diff.Add(await UnifiedDiff(path, originalSources[path], Path.Combine(candidate, path), cancellationToken));
             }
             await File.WriteAllTextAsync(Path.Combine(runDirectory, "source.diff"), string.Concat(diff), cancellationToken);
         }
@@ -86,13 +86,15 @@ public static class CandidateWorkspace
         var redControl = Path.Combine(runDirectory, "red-control");
         CopyWorkspace(root, candidate, redControl);
         var redOutput = Path.Combine(runDirectory, "red-control.log");
-        var redResult = await RunFunctionalTests(runtime, redControl, network, false, redOutput, cancellationToken);
+        var redBuild = Path.Combine(runDirectory, "red-control-build");
+        var redResult = await RunFunctionalTests(runtime, redControl, redBuild, network, false, redOutput, cancellationToken);
         if (redResult.ExitCode == 0 || !File.ReadAllText(redOutput).Contains("NullReferenceException", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Regression check was not red against the original processor");
         }
 
-        await RunFunctionalTests(runtime, candidate, network, true, Path.Combine(runDirectory, "candidate-test.log"), cancellationToken);
+        var candidateBuild = Path.Combine(runDirectory, "candidate-test-build");
+        await RunFunctionalTests(runtime, candidate, candidateBuild, network, true, Path.Combine(runDirectory, "candidate-test.log"), cancellationToken);
 
         var policyResults = new JsonArray();
         foreach (var payload in new[]
@@ -103,7 +105,7 @@ public static class CandidateWorkspace
             "{\"productId\":\"P-policy\",\"productType\":\"  \",\"price\":10}",
         })
         {
-            var result = await RunPolicyCheck(runtime, candidate, payload, cancellationToken);
+            var result = await RunPolicyCheck(runtime, candidate, candidateBuild, payload, cancellationToken);
             var line = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries).Last();
             var policy = JsonNode.Parse(line) ?? throw new InvalidOperationException("Candidate returned empty policy JSON");
             if (policy["disposition"]?.GetValue<string>() != "rejected")
@@ -197,7 +199,8 @@ public static class CandidateWorkspace
         string? output = null,
         CancellationToken cancellationToken = default,
         string network = "none",
-        IEnumerable<string>? environment = null)
+        IEnumerable<string>? environment = null,
+        string? buildDirectory = null)
     {
         var command = new List<string> { "run", "--rm", "--network", network, "--read-only" };
         command.AddRange(runtime.UserArguments);
@@ -206,6 +209,11 @@ public static class CandidateWorkspace
             "--tmpfs", "/tmp:rw,size=512m", "--tmpfs", "/home/agent:rw,mode=1777,size=256m",
             "--volume", $"{directory}:/workspace:rw",
         ]);
+        if (buildDirectory is not null)
+        {
+            Directory.CreateDirectory(buildDirectory);
+            command.AddRange(["--volume", $"{buildDirectory}:/build:rw"]);
+        }
         foreach (var value in environment ?? [])
         {
             command.AddRange(["--env", value]);
@@ -235,6 +243,7 @@ public static class CandidateWorkspace
     private static async Task<CommandResult> RunFunctionalTests(
         ContainerRuntime runtime,
         string directory,
+        string buildDirectory,
         string network,
         bool check,
         string output,
@@ -244,15 +253,16 @@ public static class CandidateWorkspace
         await ContainerDotnet(
             runtime,
             directory,
-            ["restore", project, "--locked-mode"],
+            ["restore", project, "--locked-mode", "--property:IsolatedBuildRoot=/build"],
             true,
             output,
             cancellationToken,
-            network);
+            network,
+            buildDirectory: buildDirectory);
         return await ContainerDotnet(
             runtime,
             directory,
-            ["run", "--project", project, "--configuration", "Release", "--no-restore"],
+            ["run", "--project", project, "--configuration", "Release", "--no-restore", "--property:IsolatedBuildRoot=/build"],
             check,
             output,
             cancellationToken,
@@ -261,20 +271,23 @@ public static class CandidateWorkspace
                 "FUNCTIONAL_TESTS_MODE=External",
                 "FUNCTIONAL_TESTS_KAFKA_ENDPOINT=broker:19092",
                 "FUNCTIONAL_TESTS_OTLP_ENDPOINT=http://lgtm:4318",
-            ]);
+            ],
+            buildDirectory);
     }
 
     private static Task<CommandResult> RunPolicyCheck(
         ContainerRuntime runtime,
         string directory,
+        string buildDirectory,
         string payload,
         CancellationToken cancellationToken) =>
         ContainerDotnet(
             runtime,
             directory,
-            ["run", "--project", "src/ProductWorker/ProductWorker.csproj", "--configuration", "Release", "--no-build", "--", payload],
+            ["run", "--project", "src/ProductWorker/ProductWorker.csproj", "--configuration", "Release", "--no-build", "--property:IsolatedBuildRoot=/build", "--", payload],
             true,
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            buildDirectory: buildDirectory);
 
     private static Task<CommandResult> RestoreWorker(
         ContainerRuntime runtime,
@@ -314,14 +327,6 @@ public static class CandidateWorkspace
             }
         }
     }
-
-    private static Dictionary<string, string> TextFiles(string directory) =>
-        Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
-            .Where(path => !HasDirectory(path, "bin") && !HasDirectory(path, "obj"))
-            .ToDictionary(path => Relative(directory, path), File.ReadAllText, StringComparer.Ordinal);
-
-    private static bool HasDirectory(string path, string name) =>
-        path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Contains(name, StringComparer.Ordinal);
 
     private static string Relative(string root, string path) =>
         Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/');

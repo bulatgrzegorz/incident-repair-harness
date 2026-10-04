@@ -6,5 +6,6 @@
     <NuGetAudit>false</NuGetAudit>
     <BaseIntermediateOutputPath Condition="'$(IsolatedBuildRoot)' != ''">$(IsolatedBuildRoot)/obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
     <BaseOutputPath Condition="'$(IsolatedBuildRoot)' != ''">$(IsolatedBuildRoot)/bin/$(MSBuildProjectName)/</BaseOutputPath>
+    <DefaultItemExcludes Condition="'$(IsolatedBuildRoot)' != ''">$(DefaultItemExcludes);bin/**;obj/**</DefaultItemExcludes>
   </PropertyGroup>
 </Project>

@@ -93,6 +93,30 @@ public class HarnessTests
     }
 
     [Test]
+    public async Task IsolatedBuildIgnoresLocalBuildOutputs()
+    {
+        using var temporary = new TemporaryDirectory();
+        File.Copy(Path.Combine(Repository.FindRoot(), "Directory.Build.props"), Path.Combine(temporary.Path, "Directory.Build.props"));
+        var project = Path.Combine(temporary.Path, "Example.csproj");
+        await File.WriteAllTextAsync(project, """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+            </Project>
+            """);
+        await File.WriteAllTextAsync(Path.Combine(temporary.Path, "Example.cs"), "public class Example;");
+        foreach (var directory in new[] { "bin", "obj" })
+        {
+            var output = Path.Combine(temporary.Path, directory);
+            Directory.CreateDirectory(output);
+            await File.WriteAllTextAsync(Path.Combine(output, "stale.cs"), "This generated file must not be compiled.");
+        }
+
+        await ProcessRunner.Run("dotnet",
+            ["build", project, $"--property:IsolatedBuildRoot={Path.Combine(temporary.Path, "build")}", "--property:UseSharedCompilation=false"],
+            TimeSpan.FromSeconds(60));
+    }
+
+    [Test]
     public void MissingAgentSummaryIsOptional()
     {
         using var temporary = new TemporaryDirectory();

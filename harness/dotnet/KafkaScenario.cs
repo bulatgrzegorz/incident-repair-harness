@@ -205,9 +205,9 @@ public sealed class KafkaScenario : IDisposable
         (price is null || record.Price == price) &&
         (reasonCode is null || record.ReasonCode == reasonCode);
 
-    private static int CountFailures(string path) => File.ReadAllText(path).Split("product.processing.failed").Length - 1;
+    internal static int CountFailures(string path) => File.ReadAllText(path).Split("product.processing.failed").Length - 1;
 
-    private static async Task Wait(
+    internal static async Task Wait(
         string description,
         Func<Task<bool>> condition,
         TimeSpan? timeout = null,
